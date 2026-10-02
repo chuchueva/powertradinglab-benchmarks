@@ -1,0 +1,90 @@
+PowerTradingLab — 2020-2026 Power Trading Opportunities Retrospective
+Copyright (c) 2026 Irina Chuchueva
+
+This repository contains two kinds of material, licensed separately.
+
+
+================================================================================
+1. SOFTWARE — MIT License
+================================================================================
+
+Applies to the Python scripts and the HTML gallery:
+
+    benchmarks.py
+    tables.py
+    plot_01_ev_decay.py
+    plot_02_zones.py
+    plot_03_renewable_share.py
+    plot.html
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+2. REPORT, DATA AND FIGURES — Creative Commons Attribution 4.0 International
+================================================================================
+
+Applies to the report, the derived result table, the generated figures and this
+repository's documentation:
+
+    powertradinglab_2020_2026_report.tex
+    powertradinglab_2020_2026_report.pdf
+    yearly_update.csv
+    REPORT.md
+
+You are free to share and adapt this material, including commercially, provided
+you give appropriate credit, link to the licence, and indicate if changes were
+made.
+
+Full licence text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Suggested citation:
+
+    Chuchueva, I. (2026). PowerTradingLab: A 2020-2026 Power Trading
+    Opportunities Retrospective. Zenodo. https://doi.org/<DOI>
+
+
+================================================================================
+3. TRADE MARKS AND LOGOS — not licensed
+================================================================================
+
+The PowerTradingLab name and the logo files
+
+    ptl-full-light.pdf
+    ptl-compact-light.pdf
+
+are excluded from the licences above. They may be reproduced only as part of an
+unmodified copy of the report, and may not be used to identify a derivative work
+or to suggest endorsement.
+
+
+================================================================================
+4. UPSTREAM DATA
+================================================================================
+
+The result table in this repository is derived from day-ahead and imbalance
+prices published by the ENTSO-E Transparency Platform, converted to EUR at
+European Central Bank reference rates. Those sources carry their own terms of
+use, which are not altered by this licence and which apply to anyone
+redistributing the underlying prices:
+
+    ENTSO-E Transparency Platform  https://transparency.entsoe.eu/
+    European Central Bank          https://www.ecb.europa.eu/
+
+Nothing in this repository is trading advice.

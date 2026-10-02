@@ -1,0 +1,23 @@
+/.idea
+/.venv
+.env
+__pycache__/
+*.pyc
+/data
+/logs/
+# Published artefacts. Ignored while the workflow is being run in, so the trial
+# files (including the triple pass over 2026-07-21, left over from the old
+# scoring behaviour) do not end up in history. Remove this line when the
+# contents are worth showing — or leave it for good, if published files end up
+# living in the public repo instead. Nothing moves either way; the files stay
+# where they are.
+/outputs/
+/report/figures/
+/report/*.feather
+
+# Internal notes: a separate private repository, cloned here. Never public.
+/private/
+
+/_history_files.txt
+.DS_Store
+/report/*.pdf

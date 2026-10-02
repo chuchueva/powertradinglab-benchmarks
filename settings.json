@@ -1,0 +1,105 @@
+{
+  "publication": {
+    "schema_version": 6,
+    "methodology_version": 3,
+    "publisher_name": "PowerTradingLab",
+    "publisher_url": "https://powertradinglab.org",
+    "public_from": "2026-09-17"
+  },
+  "run_time_utc": "09:40",
+  "catchup_time_utc": "14:00",
+  "areas": [
+    "NL",
+    "RO"
+  ],
+  "day_ahead": {
+    "gate_local": "12:00",
+    "gate_tz": "Europe/Brussels"
+  },
+  "zones": {
+    "NL": {
+      "eic": "10YNL----------L",
+      "tz": "Europe/Amsterdam",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "live"
+    },
+    "BE": {
+      "eic": "10YBE----------2",
+      "tz": "Europe/Brussels",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      }
+    },
+    "FR": {
+      "eic": "10YFR-RTE------C",
+      "tz": "Europe/Paris",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      }
+    },
+    "RO": {
+      "eic": "10YRO-TEL------P",
+      "tz": "Europe/Bucharest",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "RON"
+      },
+      "mode": "live"
+    }
+  },
+  "stat_action": {
+    "n_days_trailing_bias_default": 3,
+    "n_days_by_area": {}
+  },
+  "scoring": {
+    "final_day_of_month": 20,
+    "score_from": "2026-09-17"
+  },
+  "history": {
+    "month_from": "2020_01",
+    "month_to": ""
+  },
+  "update": {
+    "window_days": 3,
+    "max_query_days": 0,
+    "poll_times_utc": [
+      "09:40"
+    ],
+    "refetch_time_utc": "08:00",
+    "retry_attempts": 4,
+    "retry_delay_s": 300
+  },
+  "paths": {
+    "processed": "data/processed",
+    "zone_store": "data/processed/zones",
+    "results": "data/processed/results",
+    "logs": "logs"
+  },
+  "backup": {
+    "mode": "git",
+    "repo": "git@github.com:chuchueva/powertradinglab-backup.git",
+    "work_dir": "~/ptl-backup",
+    "key": "~/.ssh/ptl_backup",
+    "paths": [
+      "data/raw",
+      "data/processed/results",
+      "data/fx",
+      "outputs",
+      "settings.json",
+      "logs"
+    ],
+    "dir": "",
+    "keep_days": 14
+  },
+  "site": {
+    "repo": "git@github.com:chuchueva/powertradinglab-site.git",
+    "work_dir": "~/ptl-site",
+    "key": "~/.ssh/ptl_site",
+    "data_dir": "data"
+  }
+}
