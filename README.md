@@ -9,7 +9,7 @@ day-ahead gate, grades every finished day against five benchmarks, and freezes
 the result in a file that is never rewritten.
 
 - Site and data: <https://powertradinglab.org>
-- Report 2020–2026: see the site
+- Report 2020–2026: https://doi.org/10.5281/zenodo.23119533
 
 Live zones: NL, RO. Values are EUR per 1 MW, summed per delivery day.
 
