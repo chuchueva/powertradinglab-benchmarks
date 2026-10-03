@@ -40,7 +40,7 @@
 \renewcommand{\headrule}{\color{tlrule}\hrule height \headrulewidth}
 \renewcommand{\footrulewidth}{0pt}
 \fancyhead[L]{\raisebox{-2.2pt}{\includegraphics[height=9pt]{ptl-compact-light.pdf}}}
-\fancyhead[R]{\small\color{tlgrey}European Power Trading Benchmarks}
+\fancyhead[R]{\small\color{tlgrey}European Short-Term Power Trading Benchmarks}
 \fancyfoot[C]{\small\color{tlgrey}\thepage}
 
 %------------------------------ siunitx ---------------------------------------
@@ -60,7 +60,7 @@
 \vspace*{2cm}
 \includegraphics[width=0.68\linewidth]{ptl-full-light.pdf}\par
 \vspace{0.7cm}
-{\color{tlgrey}\Large European Power Trading Benchmarks\par}
+{\color{tlgrey}\Large European Short-Term Power Trading Benchmarks\par}
 \vspace{1.4cm}
 {\huge\bfseries A Retrospective Look at 2020--2026 Short-Term\\ Power Trading Opportunities in Europe\\[0.2em]}
 \vspace{2cm}
@@ -70,9 +70,9 @@
 Author: Irina Chuchueva, Independent Energy Quantitative Researcher \& Developer\\[0.2em]
 Contact: chuchueva@gmail.com\\[0.2em]
 Price Data: ENTSO-E Transparency Platform; FX: European Central Bank\\[0.2em]
-Date: September 2026\\[0.2em]
+Date: 3 October 2026\\[0.2em]
 Web: \url{https://powertradinglab.org}\\[0.2em]
-DOI: \url{https://doi.org/YY.ZZZZ/zenodo.XXXXXXX}\\}
+DOI: \url{https://doi.org/10.5281/zenodo.23119533}\\}
 \vspace{0.4cm}
 {\color{tlaccent}\rule{\linewidth}{0.6pt}}\par
 
@@ -82,7 +82,7 @@ This document does not constitute trading advice.\par}
 \end{titlepage}
 
 \section*{At a glance} \addcontentsline{toc}{section}{At a glance}
-\noindent Six years of algorithmic trading development across three European countries showed that a trader or an algorithm developer works in an opaque space. In equity trading, the S\&P 500 shows at once whether a trader or an algorithm earns above or below the market average and, in a loss, whether it loses more or less than the market as a whole. The European electricity market has no such benchmark.
+\noindent Six years of algorithmic trading development across three European countries showed me that a trader or an algorithm developer works in an opaque space. In equity trading, the S\&P 500 index shows whether a trader or an algorithm earns above or below the market average and, in a loss, whether it loses more or less than the market as a whole. The European electricity market has no such benchmark.
 
 This report arises from an attempt to build one. A study of 25 European bidding zones gives the key result: the ``speculative fat'' of the European power market peaked in 2022 and has decayed since early 2023. I call this measure the Extractable Value. Its peak in 2022 was driven by high Day-Ahead prices. During 2024--2025, two lesser peaks followed, driven by volatility in most of the zones covered. Since the end of 2025 the Extractable Value has decayed in most zones, through to the end of summer 2026. This decay raises a question: is it good or bad? For most of the researched bidding zones, the answer is: it is good, because it shows that short-term trading has, on average, become more balanced. At the same time, however, speculative portfolios have become less profitable.
 
@@ -95,7 +95,7 @@ This report arises from an attempt to build one. A study of 25 European bidding 
 This study is written for traders, portfolio managers, and algorithmic trading developers working on the European wholesale electricity market across 25 bidding zones.
 
 \vspace{0.6em}
-Two abbreviations are used throughout: \textbf{DA} for day-ahead auction and \textbf{IM} for the imbalance market and its settlement. The unit of short-term trading is the delivery of power over a single 15-minute interval: the product is bought or sold at DA and settled in IM a few hours later. The simplest sequence of a trader's actions is therefore: (i) a buy or sell decision at DA, and (ii) a forced settlement in IM. Since the prices are quoted in \euro/MWh, while a 15-minute delivery of 1\,MW is 0.25\,MWh, each per-interval result in this report is the DA-to-IM price difference multiplied by 0.25. All values are measured per 1\,MW of traded quantity and reported in \euro. Table values are monthly sums averaged over the year. Exchange fees are not included, all timestamps are UTC, and the horizon is 2020--2026, with 2026 covering only January--August. For the present report, I collected ENTSO-E archive data, processed the values and saved the calculated results in the file \textit{report/yearly\_update.csv}. The file and the Python scripts that generate it are openly available at \url{https://github.com/chuchueva/powertradinglab-benchmarks}. All calculations are reproducible against the cut-off of 2 September 2026, the date the archives were downloaded.
+Two abbreviations are used throughout: \textbf{DA} for day-ahead auction and \textbf{IM} for the imbalance market and settlement. The unit of short-term trading is the delivery of power over a single 15-minute interval: the product is bought or sold at DA and settled in IM a few hours later. The simplest sequence of a trader's actions is therefore: (i) a buy or sell decision at DA, and (ii) a forced settlement in IM. Since the prices are quoted in \euro/MWh, while a 15-minute delivery of 1\,MW is 0.25\,MWh, each per-interval result in this report is the DA-to-IM price difference multiplied by 0.25. All values are measured per 1\,MW of traded quantity and reported in \euro. Table values are monthly sums averaged over the year. Exchange fees are not included, all timestamps are UTC, and the horizon is 2020--2026, with 2026 covering only January--August. For the present report, I collected ENTSO-E archive data, processed the values and saved the calculated results in the file \textit{report/yearly\_update.csv}. The file and the Python scripts that generate it are openly available at \url{https://github.com/chuchueva/powertradinglab-benchmarks}. All calculations are reproducible against the cut-off of 2 September 2026, the date the archives were downloaded.
 
 \newpage
 \section{Scope and definitions}
@@ -120,11 +120,11 @@ Four zones are excluded because of the design of their imbalance price: ES, PT, 
 
 \subsection{Extractable Value as a measure of Speculative Fat} \label{sec:ext_value_def}
 
-To illustrate the ``speculative fat'' mentioned above, I introduce the following value. Imagine a trader with a crystal ball, who knows exactly how DA and IM prices will behave. This trader bids 1\,MW in every 15-minute interval, choosing the buy or the sell side at DA, and the position is then settled in IM with the best possible outcome. The profit of such a trader over a given period is called \textbf{Extractable Value}. This value illustrates how much ``fat'' a market holds. The reported values are monthly sums averaged over the year, i.e. an average month of that year.\footnote{A month is included if less than 10\% of its data is missing.} For example, the maximum Extractable Value among the considered bidding zones occurred in RO in June 2024 and reached $+$\euro536\,049. Note that this profit comes from trading only 1\,MW in each quarter-hour. The minimum occurred, again in RO, in December 2020 at $-$\euro35\,254.\footnote{44 zones monthly results by zone are in \textit{report/yearly\_update.csv}.} In that month, even the crystal-ball trader could not make a profit. The negative value shows that the DA price lies, on average, between the two IM prices, since RO used dual IM pricing up to July 2026.
+To illustrate the ``speculative fat'' mentioned above, I introduce the following value. Imagine a trader with a crystal ball, who knows exactly how DA and IM prices will behave. This trader bids 1\,MW in every 15-minute interval, choosing the buy or the sell side at DA, and the position is then settled in IM with the best possible outcome. The profit of such a trader over a given period is called \textbf{Extractable Value}. This value illustrates how much ``fat'' a market holds. The reported values are monthly sums averaged over the year, i.e. an average month of a specific year.\footnote{A month is included if less than 10\% of its data is missing.} For example, the maximum Extractable Value among the considered bidding zones occurred in RO in June 2024 and reached $+$\euro536\,049. Note that this profit comes from trading only 1\,MW in each quarter-hour. The minimum occurred, again in RO, in December 2020 at $-$\euro35\,254.\footnote{44 zones monthly results are in \textit{report/yearly\_update.csv}.} In that month, even the crystal-ball trader could not make a profit. The negative value shows that the DA price lies, on average, between the two IM prices, since RO used dual IM pricing up to July 2026.
 
 \subsection{Price volatility measure} \label{sec:volatility_def}
 
-To explain the behaviour of the Extractable Value, I use a second measure: volatility. Aldridge's \textit{High-Frequency Trading: A Practical Guide to Algorithmic Strategies and Trading Systems} (2013) lists dozens of definitions of volatility, the most widely used being the standard deviation of price divided by its mean. In the power market, this definition does not work well for two reasons: (i) there are two IM prices in the dual-pricing bidding zones; (ii) both IM and DA prices can be near-zero or negative. The definition below accounts for both. First, the \IM{mid} price is the average of the positive and the negative IM price:
+To explain the behaviour of the Extractable Value, I use a second measure: volatility. Aldridge's \textit{High-Frequency Trading: A Practical Guide to Algorithmic Strategies and Trading Systems} (2013) lists a dozen of definitions of volatility, the most widely used being the standard deviation of price divided by its mean. In the power market, this definition does not work well for two reasons: (i) there are two IM prices in the dual-pricing bidding zones; (ii) both IM and DA prices can be near-zero or negative. The definition below accounts for both. First, the \IM{mid} price is the average of the positive and the negative IM price:
 \[
 \IM{mid} = \bigl(\IM{pos} + \IM{neg}\bigr) / 2
 \]
@@ -133,7 +133,7 @@ Then I combine the DA and IM prices:
 \mathrm{Volatility} = \left| \mathrm{DA} - \IM{mid} \right| / \mathrm{DA}
 \]
 
-In the equations, \IM{pos} and \IM{neg} are the positive and the negative IM prices, respectively, and DA is the DA price, all in \euro/MWh. The measure shows how far IM prices move away from the DA price, relative to the latter.\footnote{The calculation is in the file \textit{report/benchmarks.py}.} It does not remove the problem of a small denominator: a DA price close to zero still inflates the ratio, as in 2020--2021 during the COVID-19 pandemic. The ratio is formed from the monthly average difference $|\mathrm{DA} - \IM{mid}|$ and the monthly average DA price in a denominator, so a few intervals priced near zero are diluted by the rest of the month, and the measure still separates months with large price deviation from quiet ones.
+In the equations, \IM{pos} and \IM{neg} are the positive and the negative IM prices, respectively, and DA is the DA price, all in \euro/MWh. The measure shows how far IM prices move away from the DA price, relative to the latter.\footnote{The calculation is in the file \textit{report/benchmarks.py}.} It does not remove the problem of a small denominator: a DA price close to zero still inflates the ratio, as in 2020--2021 during the COVID-19 pandemic. In current analysis, the ratio is formed from the monthly average difference $|\mathrm{DA} - \IM{mid}|$ and the monthly average DA price in a denominator, so a few intervals priced near zero are diluted by the rest of the month, and the measure still separates months with large price deviation from quiet ones.
 
 \section{The decay of the Extractable Value}\label{sec:decay}
 
@@ -155,11 +155,11 @@ The solid teal line is the average Extractable Value and the dashed teal line is
   \label{fig:group_A_decay}
 \end{figure}
 
-In 2020--2021, during the COVID-19 lockdown period, the Extractable Value was rather small. At the end of 2021, ahead of Russia's invasion of Ukraine, the Extractable Value started to increase and peaked in July--September 2022, when Russian pipeline gas supply to Europe was cut. In 2023, the median Extractable Value fell and settled at 0.2--0.35 of its peak. 2024 and 2025 show two distinct peaks, with the median reaching 0.36 and 0.51, respectively. At the end of 2025, the median Extractable Value dropped back to roughly the 2023 level. In summer 2026, a further drop occurred in most zones of the group.
+In 2020--2021, during the COVID-19 lockdown period, the Extractable Value was rather small. At the end of 2021, ahead of Russia's invasion of Ukraine, the Extractable Value started to increase and peaked in July--September 2022, when Russian pipeline gas supply to Europe was cut. In 2023, the median Extractable Value fell and settled at 0.2--0.35 of its peak. 2024 and 2025 show two distinct peaks, with the median Extractable Value reaching 0.36 and 0.51, respectively. At the end of 2025, this median dropped back to roughly the 2023 level. In summer 2026, a further drop occurred in most zones of the group.
 
-Note that, from 2023, the median Extractable Value mostly lies well below the average, which shows that the average is driven by peaks in individual zones. For example, summer 2026 shows the largest gap between median and average values. In the first eight months of 2026 (till the end of the reported period), the mean rises while the median does not, with the bias coming from local peaks in only two of the 14 series. Table~\ref{tab:ev_group_A} gives the Extractable Value in absolute terms and shows that only two zones, PL and HR, noticeably increased their Extractable Value in 2026 compared to 2025. These two series pull the average up, while the other 12 are flat or falling.
+Note that, from 2023, the median Extractable Value mostly lies well below the average, which shows that the average is driven by peaks in individual zones. For example, summer 2026 shows the largest gap between median and average values. In the first eight months of 2026 (till the end of the reported period), the mean rises while the median does not, with the bias coming from local peaks in only two of the 14 zones. Table~\ref{tab:ev_group_A} gives the Extractable Value in absolute values and shows that only two zones, PL and HR, noticeably increased their Extractable Value in 2026 compared to 2025. These two zones pull the average up, while the other 12 are flat or falling.
 
-This raises a question: what drove the Extractable Value over the period: high DA prices or high volatility? Figure~\ref{fig:group_A_decay} shows that the 2022 peak coincided with high DA prices. The two series moved together over 2020--2022. DA prices then fell to 0.15--0.30 of their peak and stayed there. From mid-2023, volatility rose: two peaks happened in mid-2024 and mid-2025. During this two-year period, DA prices remained rather low. This supports the assumption that the 2024--2025 growth of the Extractable Value came from higher volatility.
+This raises a question: what drove the Extractable Value over the period: high DA prices or high volatility? Figure~\ref{fig:group_A_decay} shows that the 2022 peak coincided with high DA prices. The two prices moved together over 2020--2022. DA prices then fell to 0.15--0.30 of their peak and stayed there. From mid-2023, volatility rose: two peaks happened in mid-2024 and mid-2025. During this two-year period, DA prices remained rather low. This supports the assumption that the 2024--2025 growth of the Extractable Value came from higher volatility.
 
 \begin{table}[htbp]
 \centering
@@ -240,7 +240,7 @@ The 2026 US--Iranian crisis in the Persian Gulf, which began in March, and the o
 
 \subsection{Adverse Value}
 
-Section~\ref{sec:ext_value_def} introduced the crystal-ball trader. Now consider a doom trader, whose aim is the exact opposite: to lose as much as possible. The total loss of this trader is the Adverse Value: how much it is possible to lose over a period. In zones with single IM pricing, the Adverse Value mirrors the Extractable Value---the same absolute value with the opposite sign. For bidding zones with dual pricing, these numbers can diverge widely. Only five of the 25 zones have used dual IM pricing during the report period; their Adverse Value is given in Table~\ref{tab:av_dual}.
+Section~\ref{sec:ext_value_def} introduced the crystal-ball trader. Now consider a doom trader, whose aim is the exact opposite: to lose as much as possible. The total loss of this trader is the Adverse Value: how much it is possible to lose over a period. In zones with single IM pricing, the Adverse Value mirrors the Extractable Value -- the same absolute value with the opposite sign. For bidding zones with dual pricing, these numbers can diverge widely. Only five of the 25 zones have used dual IM pricing during the report period; their Adverse Value is given in Table~\ref{tab:av_dual}.
 
 \begin{table}[htbp]
 \centering
@@ -263,7 +263,7 @@ RO & $-$61\,920 & $-$92\,355 & $-$202\,105 & $-$144\,982 & $-$276\,404 & $-$134\
 
 In 2020 in RO, the Extractable Value was $-$\euro24\,943 while at the same time the Adverse Value was $-$\euro61\,920. Both values being negative means that the DA price sits, on average, between the two IM prices, so the average IM settlement for that year was a loss. A preliminary analysis of ES, PT, CH and SI shows the same behaviour over 2020--2026: in most years, both the Extractable and the Adverse Value are negative.
 
-In 2023 in CZ, the crystal-ball trader earns $+$\euro86\,879, while the doom trader loses $-$\euro159\,222, almost twice as much in absolute value. However, after the transition from dual to single IM pricing in July 2024, the Adverse Value becomes a mirror of the Extractable Value. During 2020--2024, CZ and RO showed the widest gap between the Adverse and the Extractable Value---about \euro39K and \euro41K respectively.
+In 2023 in CZ, the crystal-ball trader earns $+$\euro86\,879, while the doom trader loses $-$\euro159\,222, almost twice as much in absolute value. However, after the transition from dual to single IM pricing in July 2024, the Adverse Value becomes a mirror of the Extractable Value. During 2020--2024, CZ and RO showed the widest gap between the Adverse and the Extractable Value -- about \euro39K and \euro41K respectively.
 
 \subsection{Passive DA Buy and Sell Values}
 
@@ -296,7 +296,7 @@ Gr. & Zone & 2020 & 2021 & 2022 & 2023 & 2024 & 2025 & 2026 \\
 \label{tab:passive_sell_single}
 \end{table}
 
-In 2022 in AT, the Passive DA Sell Value was $+$\euro21\,151, i.e., IM prices were on average well below DA. An opposite example is EE in 2022, where the Passive DA Sell Value is $-$\euro24\,183, i.e., IM prices were, on average, above DA. In 2026, HR and LV traded with DA prices, on average, above IM prices. That bias gave a passive strategy $+$\euro14\,556 and $+$\euro16\,003 respectively.
+In 2022 in AT, the Passive DA Sell Value was $+$\euro21\,151, i.e., IM prices were on average well below DA. An opposite example is EE in 2022, where the Passive DA Sell Value is $-$\euro24\,183, i.e., IM prices were, on average, above DA. In 2026, HR and LV traded with DA prices, on average, above IM prices. That bias gave a passive strategy $+$\euro14\,556 and $+$\euro16\,003 respectively for 1\,MW traded quantity.
 
 For the dual-pricing zones the picture differs (Table~\ref{tab:passive_dual}).
 
@@ -368,16 +368,16 @@ Gr. & Zone & 2020 & 2021 & 2022 & 2023 & 2024 & 2025 & 2026 \\
 
 Two zones, NL and FR, remain negative throughout the entire period, so they are the hardest zones in which to manage either a physical or a speculative portfolio. At the same time, the BE, DE\_LU, FI, HR, LV and RS zones have remained constantly positive, which on average makes both types of portfolio easiest to manage there.
 
-Let us consider the following ``efficiency'': the sum of the Trailing Bias Values of 2022--2026 from Table~\ref{tab:trailing_bias} divided by the sum of the Extractable Values of the same years from Tables~\ref{tab:ev_group_A} and~\ref{tab:ev_group_B}. It shows how much of the market ``fat'' a simple trailing bias strategy picks up. The most effective zone is NO with 18\%, followed by SE with 10\%; a group of five zones, LV, EE, FI, DE\_LU and RO, sits between 6\% and 8\%. At the other end, NL gives up 14\% of the fat it could have taken, CZ 12\% and FR 9\%; almost all of the CZ figure comes from just one year---2023.
+Let us consider the following ``efficiency'': the sum of the Trailing Bias Values of 2022--2026 from Table~\ref{tab:trailing_bias} divided by the sum of the Extractable Values of the same years from Tables~\ref{tab:ev_group_A} and~\ref{tab:ev_group_B}. It shows how much of the market ``fat'' a simple trailing bias strategy picks up. The most effective zone is NO with 18\%, followed by SE with 10\%; a group of five zones, LV, EE, FI, DE\_LU and RO, sits between 6\% and 8\%. At the other end, NL gives up 14\% of the fat it could have taken, CZ 12\% and FR 9\%; almost all of the CZ figure comes from just one year -- 2023.
 
-Calculated daily and published through the PowerTradingLab service, the Trailing Bias Value can act as an S\&P 500-like benchmark: it lets a trader compare internal P\&L against the trailing bias baseline. Any more sophisticated strategy should beat it on profit.
+Calculated daily and published through the PowerTradingLab file service, the Trailing Bias Value can act as an S\&P 500-like benchmark: it lets a trader compare internal P\&L against the trailing bias baseline. In a long run, a more sophisticated strategy should beat it on profit.
 
 \subsection{Benchmark examples}
 
 Suppose a trader runs a speculative book of 1\,MW in NL and closes August 2026 at $+$\euro3\,000. That month, the Extractable Value was \euro26\,418 and the
-Trailing Bias Value $-$\euro10\,172, so the trader took 11\% of what the price pair held and beat the only baseline that could actually be followed by \euro13\,172. The same \euro3\,000 earned in RO in the same month would be 4\% of that zone's ceiling of \euro74\,385, against a Trailing Bias Value of $-$\euro7\,565. The P\&L is identical, but the result is not: in RO the same money leaves far more on the table.
+Trailing Bias Value $-$\euro10\,172, so the trader took 11\% of what the price pair held and beat the only baseline that could actually be followed by \euro13\,172. Well done to such trader! The same \euro3\,000 earned in RO in the same month would be 4\% of that zone's ceiling of \euro74\,385, against a Trailing Bias Value of $-$\euro7\,565. The P\&L is identical, but the result is not quite: in RO the same money leaves far more on the table. A RO trader could have done better.
 
-Now suppose the same trader runs 1\,MW in RO and closes July 2026 at $+$\euro8\,000. The Extractable Value that month was \euro104\,169 and the Trailing Bias Value $+$\euro12\,427, so the trader took 8\% of the ceiling and still lost \euro4\,427 to a rule that uses nothing but the bias of the previous three days. The same \euro8\,000 earned in NL in the same month would read the other way -- 39\% of a much thinner ceiling, \euro20\,540, and \euro12\,614 above a baseline Trailing Bias Value of $-$\euro4\,614. One P\&L figure, two opposite verdicts. 
+Now suppose the same trader runs 1\,MW in RO and closes July 2026 at $+$\euro8\,000. The Extractable Value that month was \euro104\,169 and the Trailing Bias Value $+$\euro12\,427, so the trader took 8\% of the ceiling and still lost \euro4\,427 to a rule that uses nothing but the bias of the previous three days. The same \euro8\,000 earned in NL in the same month would read the other way -- 39\% of a much thinner ceiling, \euro20\,540, and \euro12\,614 above a baseline Trailing Bias Value of $-$\euro4\,614. A brilliant job for NL trader! One P\&L figure, two opposite verdicts. 
 
 The ratio carries across zones and months, and the comparison should be made against both the Trailing Bias Value, and the Extractable Value, remembering that the latter is a ceiling that no-one can achieve.
 
@@ -391,19 +391,19 @@ To answer this question, I split trading into two activities: (i) balancing a ph
 
 Three zones deserve a separate note: NL, HU and RO.
 
-NL and HU operate with dual IM pricing. In a dual-pricing zone, the two imbalance prices may coincide ($\IM{pos} = \IM{neg}$), or differ ($\IM{pos} \neq \IM{neg}$), and in the Netherlands the proportion of quarters in which they differ has grown steadily. The open resource NL Imbalance Market Report: Dual Pricing (\url{https://imbalance.boerman.dev/}) reports roughly 2\,600--3\,000 dual-priced quarters a year over 2020--2023, against 9\,284 by the end of August 2026. The IM spread itself also widened: averaged over all quarters of the year, the gap between the two IM prices widened from about 11\,\euro/MWh in 2020 to 28\,\euro/MWh in 2026 for NL. 
+NL and HU operate with dual IM pricing. In a dual-pricing zone, the two imbalance prices may coincide ($\IM{pos} = \IM{neg}$), or differ ($\IM{pos} \neq \IM{neg}$), and in NL the proportion of quarters in which they differ has grown steadily. The open resource NL Imbalance Market Report: Dual Pricing (\url{https://imbalance.boerman.dev/}) reports roughly 2\,600--3\,000 dual-priced quarters a year over 2020--2023, against 9\,284 by the end of August 2026. The IM spread itself also widened: averaged over all quarters of the year, the gap between the two IM prices widened from about 11\,\euro/MWh in 2020 to 28\,\euro/MWh in 2026 for NL. 
 
 HU is the sharper case. Until the end of July 2026, it was among the ``fattest'' zones of this report, with an Extractable Value near \euro100\,000 per month on 1\,MW through 2024 and 2025. In August 2026, the zone returned to dual IM pricing and its Extractable Value collapsed to \euro1\,480 in that single month, while the average gap between the two IM prices jumped from 0 to 209\,\euro/MWh: the cost of an error rose sharply.
 
 For these two zones, the decay of Extractable Value includes both (i) a convergence of DA and IM prices and (ii) a widening of the IM spread. These conditions make portfolio management harder, whether physical or speculative.
 
-RO moves the other way. Until the end of June 2026, the zone used dual IM pricing, and the gap between its two IM prices took \euro3\,000 to \euro11\,600 a month out of the Extractable Value---on average, \euro6\,190 a month through 2025. From July 2026 the zone prices IM singly: that deduction is gone, and the Adverse Value is the exact mirror of the Extractable Value. The decay of the last two months is visible, but two months are too few to judge whether the zone will lose its place among the fattest.
+RO moves the other way. Until the end of June 2026, the zone used dual IM pricing, and the gap between its two IM prices took \euro3\,000 to \euro11\,600 a month out of the Extractable Value. From July 2026 the zone prices IM singly: that deduction is gone, and the Adverse Value is the exact mirror of the Extractable Value. The decay of the last two months is visible, but two months are too few to judge whether the zone will lose its place among the fattest.
 
 \section{Appendix}
 
 \subsection{Benchmarks Summary}
 
-To increase transparency in the European Power Market and reduce opaqueness for traders and algorithmic trading developers, I have developed a free open-source service that publishes five measurements daily as trading benchmarks: as of September 2026, it covers two bidding zones, the Netherlands (NL) and Romania (RO). Coverage is planned to expand, ideally to all 44 bidding zones of the European power market.
+To increase transparency in the European Power Market and reduce opaqueness for traders and algorithmic trading developers, I have developed a free open-source service that publishes five measurements daily as trading benchmarks: as of October 2026, it covers two bidding zones, the Netherlands (NL) and Romania (RO). Coverage is planned to expand, ideally to all 44 bidding zones of the European power market.
 
 \begin{table}[htbp]
 \centering
@@ -432,17 +432,17 @@ The first four benchmarks are scored on actual DA and IM prices published by ENT
 
 The PowerTradingLab service computes the five benchmarks of Table~\ref{tab:ptl_benchmarks} every day for the bidding zones and publishes them as plain files at \url{https://powertradinglab.org}. There is no account, no paywall and no API: the files are the interface.
 
-\textbf{Daily cycle.} The service runs on one server on a fixed schedule in UTC. At 09:40 it collects the latest DA and IM prices from the ENTSO-E Transparency Platform, issues the Trailing Bias decision for the next delivery day before the 12:00 (CET time) DA gate closure, scores every delivery day that has ended, writes the results and publishes them. A second run at 14:00 collects data the source published late and scored if missed in the morning run. On the 20th of each month the service requests the previous month prices again, so that settled IM prices replace preliminary ones.
+\textbf{Daily cycle.} The service runs on one server on a fixed schedule in UTC. At 09:40 UTC it collects the latest DA and IM prices from the ENTSO-E Transparency Platform, issues the Trailing Bias decision for the next delivery day before the 12:00 (CET time) DA gate closure, scores every delivery day that has ended, writes the results and publishes them. A second run at 14:00 UTC collects data the source published late and scored if missed in the morning run. On the 20th of each month the service requests the previous month prices again, so that settled IM prices replace preliminary ones.
 
 \textbf{Time stamps.} Every stored value carries two timestamps: the 15-minute delivery interval and the instant the price became known. A decision for day D uses only values known before the DA gate of day D$-$1, in the latest version available at that source. When the source corrects a price, the service keeps both versions, so any past decision can be reproduced from exactly what was known when it was made.
 
-\textbf{Two passes.} Each delivery day is graded exactly twice: \emph{as-known}, the morning 9:40 UTC after delivery once the IM prices are complete, and \emph{as-final}, after the 20th of the following month once settlement has closed.
+\textbf{Two scoring passes.} Each delivery day is scored exactly twice: \emph{as-known}, the morning 9:40 UTC after delivery once the IM prices are complete, and \emph{as-final}, after the 20th of the following month once settlement has closed.
 
 \textbf{Frozen record.} Each forecast and each score is written once as an XML file with every 15-minute interval and the parameters behind it, and is never rewritten; a correction appears as a new file beside the old one. Each file carries two version numbers: \emph{schema}, which updates when the XML/CSV file's structure changes, and \emph{methodology}, which updates when the same input could produce a different number. History is never re-rendered under a newer methodology.
 
 \textbf{Reader files.} Beside the archive, the service rebuilds a set of CSV files after every run: one row per zone and delivery day, in three files per series (full history, last 90 days, latest day) with an index listing every file and its checksum. Every row names the archive file it was derived from. Absences are explicit: an empty cell is never a zero, the number of scored intervals travels with every daily sum, and a refused forecast states which input day was incomplete.
 
-\textbf{Coverage.} As of 5 October 2026 the live zones are NL and RO; the public series start on 17 September 2026. A new zone first runs in shadow mode (collected and computed, not published) until its data behaviour is understood. All raw responses of the source are kept privately, so the published numbers can be rebuilt from their inputs.
+\textbf{Coverage.} As of 3 October 2026 the live zones are NL and RO; the public data start on 17 September 2026. A new zone first runs in shadow mode (collected and computed, not published) until its data behaviour is understood. All raw responses of the source are kept privately, so the published numbers can be rebuilt from their inputs.
 
 \subsection{Sources and attribution}
 
