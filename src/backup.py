@@ -21,10 +21,10 @@ keeps every response with the instant it was fetched. Whatever the store knows
 about when a value appeared, raw knows first. Keeping raw and dropping the store
 backs up the cause instead of the effect.
 
-The honest hole in that: no code rebuilds the store from raw today — the
-2020-2026 seed came from the bulk archive, not from raw. Until that exists, the
-store's protection is the machine's own snapshots, and this repository is the
-guarantee that nothing which cannot be recomputed is ever lost with the disk.
+The store comes back from raw with src/rebuild.py (since 2026-10-09). It starts
+where raw starts; the 2020-2026 history once poured in from the bulk archive is
+not part of it, and nothing live needs it. This repository is the guarantee
+that nothing which cannot be recomputed is ever lost with the disk.
 
 The history caches (data/processed/history_*.feather) and data/archive are large,
 static and re-downloadable, and by our own rule they are a dev convenience rather

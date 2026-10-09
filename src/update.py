@@ -106,6 +106,25 @@ def _check_currency(df: pd.DataFrame, doc: str, area: str) -> pd.DataFrame:
     return df
 
 
+def parse_da_file(path: Path, area: str) -> tuple[pd.DataFrame, dict]:
+    """One saved A44 response -> the store's DA rows + the parser's meta.
+
+    Shared by the daily update and by rebuild: a raw file is read the same way
+    on the morning it arrives and on the day the store is rebuilt from it.
+    """
+    res = parse_da_xml(path.read_text(encoding="utf-8"))
+    df = _check_currency(res.df.assign(knownby_ts=_fetched_ts(path)), "A44", area)
+    return df[DA_COLS], res.meta
+
+
+def parse_im_file(path: Path, area: str) -> tuple[pd.DataFrame, dict]:
+    """One saved A85 response -> the store's IM rows + the parser's meta."""
+    res = parse_im_bytes(path.read_bytes())
+    df = res.df.rename(columns=IM_RENAME).assign(knownby_ts=_fetched_ts(path))
+    df = _check_currency(df, "A85", area)
+    return df[IM_COLS], res.meta
+
+
 def fetch_da(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
     """A44 for the window -> [delivery_ts, knownby_ts, currency, price_da]."""
     eic = cfg.eic(area)
@@ -121,10 +140,9 @@ def fetch_da(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
         log.warning("%s: A44 returned HTTP 400, retrying with businessType=A62", area)
         path = fetch_raw({**params, "businessType": "A62"}, "A44", area)
 
-    res = parse_da_xml(path.read_text(encoding="utf-8"))
-    df = _check_currency(res.df.assign(knownby_ts=_fetched_ts(path)), "A44", area)
-    return df[DA_COLS], {"created_datetime": res.meta.get("knownby_ts"),
-                         "raw_file": str(path.relative_to(ROOT))}
+    df, meta = parse_da_file(path, area)
+    return df, {"created_datetime": meta.get("knownby_ts"),
+                "raw_file": str(path.relative_to(ROOT))}
 
 
 def fetch_im(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
@@ -133,11 +151,9 @@ def fetch_im(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
               "periodStart": ps, "periodEnd": pe}
     path = fetch_raw(params, "A85", area)
 
-    res = parse_im_bytes(path.read_bytes())
-    df = res.df.rename(columns=IM_RENAME).assign(knownby_ts=_fetched_ts(path))
-    df = _check_currency(df, "A85", area)
-    return df[IM_COLS], {"created_datetime": res.meta.get("knownby_ts"),
-                         "raw_file": str(path.relative_to(ROOT))}
+    df, meta = parse_im_file(path, area)
+    return df, {"created_datetime": meta.get("knownby_ts"),
+                "raw_file": str(path.relative_to(ROOT))}
 
 
 # --------------------------------------------------------------------------- #
