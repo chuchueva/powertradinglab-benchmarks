@@ -61,6 +61,7 @@ and it must finish before the 12:00 market-local auction gate), `catchup` at
 | file | owns | the rule it enforces |
 |---|---|---|
 | `workflow.py` | the per-zone store, logging, seed, migrate, `for_each_area` | versions are kept on write, collapsed on read |
+| `rebuild.py` | the store, rebuilt from `data/raw` alone | the store is a fold over raw: same parsing, same diff as `update` |
 | `update.py` | polling, diffing, the poll log | only CHANGES are stored |
 | `workflow_compute.py` | forecast / score | a day is scored exactly twice, and never forecast on a day that is not whole |
 | `publish.py` | rendering the tables as published XML | a published file is frozen; it computes nothing — including the version, which is read from the row |
@@ -161,3 +162,4 @@ point of putting it there.
 | what did we decide, and on what? | `forecasts.parquet`, column `data_through` |
 | do the report numbers still hold? | `uv run python -m modelling.validate_as_of` |
 | is the whole thing still sane? | `uv run pytest tests/ -q` |
+| the store is lost or suspect | `uv run python -m src.rebuild --force` — starts where `data/raw` starts |
