@@ -311,7 +311,10 @@ def update(day_from: date, day_to: date, area: str, log=None) -> pd.DataFrame:
         rec |= {"fetched_ts": fresh["knownby_ts"].iloc[0] if len(fresh) else rec["fetched_ts"],
                 "n_rows": len(fresh), "n_new": n_new, "n_changed": n_changed, **meta}
         polls.append(rec)
-        updated[doc] = pd.concat([store, keep], ignore_index=True)[cols]
+        # A new zone starts from an empty store: take the rows as they are
+        # rather than concatenating them onto nothing.
+        updated[doc] = (keep[cols].reset_index(drop=True) if store.empty
+                        else pd.concat([store, keep], ignore_index=True)[cols])
         log.info("%s %s %s..%s: %d rows returned, %d new, %d revised",
                  area, doc, day_from, day_to, len(fresh), n_new, n_changed)
 

@@ -22,6 +22,7 @@ from src.entsoe_ack import NoDataAvailable  # noqa: E402
 from src.parse_da import parse_da_xml  # noqa: E402
 from src.parse_im import parse_im_bytes  # noqa: E402
 from src.update import IM_RENAME, new_versions, split_range  # noqa: E402
+from src.workflow import DA_COLS, IM_COLS, _assert_utc, empty_table  # noqa: E402
 
 VALUES = ["price_im_pos", "price_im_neg"]
 T0 = pd.Timestamp("2026-08-01 00:00", tz="UTC")
@@ -41,6 +42,24 @@ def test_empty_store_takes_everything():
     fresh = _frame([(10.0, 12.0), (11.0, 11.0)], [5, 5])
     keep, n_new, n_changed = new_versions(fresh, fresh.iloc[:0], VALUES)
     assert len(keep) == 2 and n_new == 2 and n_changed == 0
+
+
+def test_a_new_zone_store_keeps_its_types():
+    """
+    A zone with no store yet must be writable on its first poll.
+
+    On 2026-10-13 four new zones failed exactly here: the empty store was an
+    untyped frame, the first rows were concatenated onto it, delivery_ts lost
+    its datetime type and the UTC check raised. The empty table now carries the
+    store's types, so both an empty leg (a document with no data) and an empty
+    leg plus fresh rows pass the check.
+    """
+    da, im = empty_table(DA_COLS), empty_table(IM_COLS)
+    _assert_utc(da)                       # the leg that got "no data" today
+    fresh = pd.DataFrame({"delivery_ts": [T0], "knownby_ts": [T0],
+                          "currency": ["EUR"], "price_da": [50.0]})
+    _assert_utc(pd.concat([da, fresh], ignore_index=True))
+    assert str(im["price_im_pos"].dtype) == "float64"
 
 
 def test_identical_poll_writes_nothing():

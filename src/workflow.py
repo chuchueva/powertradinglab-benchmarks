@@ -199,6 +199,22 @@ def _assert_utc(df: pd.DataFrame, cols=("delivery_ts", "knownby_ts")) -> None:
         assert str(df[c].dt.tz) == "UTC", f"{c} is not UTC"
 
 
+# Column types of an EMPTY store table. A new zone has no store yet, and an
+# untyped empty frame is not harmless: concatenated with the first real rows it
+# turns delivery_ts into plain objects, and the UTC check then fails. That is
+# how four zones failed on their first run (2026-10-13) — NL and RO had never
+# had an empty store, because they were filled from the archive first.
+_STORE_DTYPES = {"delivery_ts": "datetime64[ns, UTC]",
+                 "knownby_ts": "datetime64[ns, UTC]",
+                 "currency": "object"}                 # prices: float64
+
+
+def empty_table(cols: list[str]) -> pd.DataFrame:
+    """An empty store table with the right column types."""
+    return pd.DataFrame({c: pd.Series(dtype=_STORE_DTYPES.get(c, "float64"))
+                         for c in cols})
+
+
 def load_store(area: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read one zone's DA and IM stores (empty frames if not seeded yet)."""
     if not os.path.exists(da_store(area)) and os.path.exists(_old_store(area, "da")):
@@ -206,9 +222,9 @@ def load_store(area: str) -> tuple[pd.DataFrame, pd.DataFrame]:
             f"The {area} store is still in the old single-version feather "
             f"format. Run: uv run python src/workflow.py migrate {area}")
     da = (pd.read_parquet(da_store(area)) if os.path.exists(da_store(area))
-          else pd.DataFrame(columns=DA_COLS))
+          else empty_table(DA_COLS))
     im = (pd.read_parquet(im_store(area)) if os.path.exists(im_store(area))
-          else pd.DataFrame(columns=IM_COLS))
+          else empty_table(IM_COLS))
     return da, im
 
 
