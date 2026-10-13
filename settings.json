@@ -10,7 +10,11 @@
   "catchup_time_utc": "14:00",
   "areas": [
     "NL",
-    "RO"
+    "RO",
+    "LV",
+    "EE",
+    "SK",
+    "SI"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -50,6 +54,42 @@
         "IM": "RON"
       },
       "mode": "live"
+    },
+    "LV": {
+      "eic": "10YLV-1001A00074",
+      "tz": "Europe/Riga",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "EE": {
+      "eic": "10Y1001A1001A39I",
+      "tz": "Europe/Tallinn",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "SK": {
+      "eic": "10YSK-SEPS-----K",
+      "tz": "Europe/Bratislava",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "SI": {
+      "eic": "10YSI-ELES-----O",
+      "tz": "Europe/Ljubljana",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
     }
   },
   "stat_action": {
