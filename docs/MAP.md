@@ -21,8 +21,8 @@ Three documents, three kinds of knowledge:
              │                                build_history
      parse_da / parse_im                  history_{da,im,load}.feather
              │                                        │
-             └──────────► NL STORE ◄──────────────────┘
-                   nl_da.parquet, nl_im.parquet          (seed, once)
+             └────────► ZONE STORE ◄──────────────────┘
+          zones/<AREA>/da.parquet, im.parquet   (archive fill: by hand, optional)
                             │
                         as_of(current_ts)          ← the only causality rule
                             │
@@ -32,7 +32,8 @@ Three documents, three kinds of knowledge:
               forecasts.parquet ──► scores.parquet
 ```
 
-Three launchd jobs, all through `scripts/run.sh`:
+Three systemd timers on the server (`scripts/make_systemd.py`), all through
+`scripts/run.sh`:
 `daily` at 09:40 UTC (update -> forecast -> score -> publish — the one decision,
 and it must finish before the 12:00 market-local auction gate), `catchup` at
 14:00 UTC (update -> score -> publish, NEVER forecast: the gate has closed), and
@@ -52,7 +53,7 @@ and it must finish before the 12:00 market-local auction gate), `catchup` at
 | file | owns | the rule it enforces |
 |---|---|---|
 | `ingest.py` | the HTTP request, saving raw bytes + sidecar | keep exactly what the source said; never log the key |
-| `parse_da.py` / `parse_im.py` | live A44 / A85 documents | read the currency, never assume it |
+| `parse_da.py` / `parse_im.py` | live A44 / A85 documents | read the currency, never assume it; a price published per hour fills each of its four quarter-hours |
 | `parse_filelibrary.py` | the monthly extracts (all zones) | Positive = A04/long, Negative = A05/short |
 | `parse_fx.py`, `parse_fx_nbu.py` | ECB and NBU rates → one daily table | no rate is invented outside a currency's own span |
 
@@ -79,19 +80,20 @@ with the working directory inside `modelling/` created a second `data/raw` and
 `logs/` there, and hid two fetched files well enough that we went looking for a
 network fault which did not exist.
 
-Names carry the scope: a `_nl` suffix means the module really is tied to the NL
-store or EIC code. `publish` and `status` have no suffix because their output
-spans zones — `status.py` still reaches into the NL store internally, and that
-is the one thing in it that changes when zone two arrives.
+No module is named after a zone. What is particular to a zone — EIC, time
+zone, expected currency, `shadow` or `live` — lives in `settings.json -> zones`,
+and `areas` says which zones run. The store can always be rebuilt from
+`data/raw` alone (`src/rebuild.py`); it then starts where raw starts.
 
 **Around it**
 
 | file | owns |
 |---|---|
-| `modelling/benchmarks.py` | the yearly report over all zones → `yearly.csv` |
-| `modelling/validate_as_of.py` | proof that live == backtest (NL 2025, exact) |
-| `scripts/make_launchd.py` | the schedule; converts our UTC times to local ones |
-| `tests/` | 103 cases, each docstring says WHY — faster to read than the code |
+| `report/benchmarks.py` | the yearly report over all zones → `yearly.csv` |
+| `validate_as_of.py` (notes repository) | proof that live == backtest (NL 2025, exact) |
+| `scripts/make_systemd.py` | the server schedule (three timers, UTC) |
+| `scripts/make_launchd.py` | the same schedule for a Mac; kept as the way back |
+| `tests/` | 108 cases, each docstring says WHY — faster to read than the code |
 
 ## The five tables that matter
 
@@ -160,6 +162,6 @@ point of putting it there.
 | what did the source say? | `data/raw/YYYY/MM/` + the sidecar |
 | did anything change today? | `polls.parquet`, columns `n_new` / `n_changed` |
 | what did we decide, and on what? | `forecasts.parquet`, column `data_through` |
-| do the report numbers still hold? | `uv run python -m modelling.validate_as_of` |
+| do the report numbers still hold? | `validate_as_of.py`, kept in the notes repository |
 | is the whole thing still sane? | `uv run pytest tests/ -q` |
 | the store is lost or suspect | `uv run python -m src.rebuild --force` — starts where `data/raw` starts |

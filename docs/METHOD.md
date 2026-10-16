@@ -12,7 +12,9 @@ the test docstrings say why the rule exists.
 2. **Two time entities.** `delivery_ts` is the 15-minute period (PTU) a value is
    about; `knownby_ts` is when the value became known. The as-of cursor
    `current_ts` is not a third kind of time: in our own outputs it IS the
-   `knownby_ts`.
+   `knownby_ts`. A price the source publishes per hour (or half-hour) is
+   written to each quarter-hour it covers, with the same value: the same
+   product, and the same sum over 1 MW.
 3. **`as_of` is two steps:** keep rows with `knownby_ts < current_ts`, then keep
    the newest `knownby_ts` per key. Forgetting the second step is invisible
    until a value has two versions, and then it silently corrupts.
