@@ -11,10 +11,11 @@
   "areas": [
     "NL",
     "RO",
-    "LV",
     "EE",
-    "SK",
-    "SI"
+    "SI",
+    "SE1",
+    "NO5",
+    "AL"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -85,6 +86,33 @@
     "SI": {
       "eic": "10YSI-ELES-----O",
       "tz": "Europe/Ljubljana",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "SE1": {
+      "eic": "10Y1001A1001A44P",
+      "tz": "Europe/Stockholm",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "NO5": {
+      "eic": "10Y1001A1001A48H",
+      "tz": "Europe/Oslo",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "AL": {
+      "eic": "10YAL-KESH-----5",
+      "tz": "Europe/Tirane",
       "expect_currency": {
         "DA": "EUR",
         "IM": "EUR"
