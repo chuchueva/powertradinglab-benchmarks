@@ -53,6 +53,15 @@ _RESOLUTION_MINUTES = {
 }
 
 
+# Every row in the store is one quarter-hour. A price published per hour (AL,
+# 2026) or per half-hour applies to each quarter-hour inside it, so it is
+# written once per quarter-hour with the same value. Nothing is invented: it is
+# the same product, and the sum over 1 MW is unchanged. Without this an hourly
+# zone has 24 rows a day, every day fails the 96-quarter completeness check,
+# and the zone never gets a decision.
+QUARTER_MIN = 15
+
+
 @dataclass
 class ParseResult:
     """Parsed data plus quality metadata."""
@@ -116,8 +125,10 @@ def _parse_period(period_el, ns_strip) -> tuple[list[dict], int, int]:
                 f"No value available for position {pos}: "
                 "curve does not start at position 1 (real gap, not A03 compression)."
             )
-        delivery_ts = start + timedelta(minutes=minutes * (pos - 1))
-        rows.append({"delivery_ts": delivery_ts, "price_da": last_value})
+        mtu_start = start + timedelta(minutes=minutes * (pos - 1))
+        for q in range(minutes // QUARTER_MIN):
+            rows.append({"delivery_ts": mtu_start + timedelta(minutes=QUARTER_MIN * q),
+                         "price_da": last_value})
 
     return rows, n_explicit, n_expected
 

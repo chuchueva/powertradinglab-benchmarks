@@ -277,6 +277,48 @@ def test_the_cap_comes_from_settings_when_not_given():
     a, b = date(2020, 1, 1), date(2020, 12, 31)
     assert split_range(a, b) == split_range(a, b, cfg.max_query_days())
 
+def test_an_hourly_day_ahead_price_fills_its_four_quarters():
+    """
+    AL publishes per hour. Each hourly price is written to the four
+    quarter-hours it covers, so an hourly zone fills the same 96-row day as
+    every other zone and passes the completeness check.
+    """
+    xml = """<Publication_MarketDocument>
+      <type>A44</type>
+      <createdDateTime>2026-10-16T08:00:00Z</createdDateTime>
+      <TimeSeries><currency_Unit.name>EUR</currency_Unit.name>
+        <Period>
+          <timeInterval><start>2026-10-15T22:00Z</start><end>2026-10-16T00:00Z</end></timeInterval>
+          <resolution>PT60M</resolution>
+          <Point><position>1</position><price.amount>10</price.amount></Point>
+          <Point><position>2</position><price.amount>20</price.amount></Point>
+        </Period>
+      </TimeSeries>
+    </Publication_MarketDocument>"""
+    df = parse_da_xml(xml).df
+    assert len(df) == 8
+    assert list(df["price_da"]) == [10.0] * 4 + [20.0] * 4
+    assert (df["delivery_ts"].diff().dropna() == pd.Timedelta(minutes=15)).all()
+
+
+def test_an_hourly_imbalance_price_fills_its_four_quarters():
+    xml = b"""<Balancing_MarketDocument>
+      <type>A85</type>
+      <createdDateTime>2026-10-16T08:00:00Z</createdDateTime>
+      <TimeSeries><currency_Unit.name>EUR</currency_Unit.name>
+        <Period>
+          <timeInterval><start>2026-10-15T22:00Z</start><end>2026-10-15T23:00Z</end></timeInterval>
+          <resolution>PT60M</resolution>
+          <Point><position>1</position>
+            <imbalance_Price.amount>55</imbalance_Price.amount>
+            <imbalance_Price.category>A04</imbalance_Price.category></Point>
+        </Period>
+      </TimeSeries>
+    </Balancing_MarketDocument>"""
+    df = parse_im_bytes(xml).df
+    assert len(df) == 4
+    assert (df["price_im_long"] == 55.0).all()
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

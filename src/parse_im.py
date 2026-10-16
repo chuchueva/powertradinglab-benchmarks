@@ -48,6 +48,15 @@ _RESOLUTION_MINUTES = {
     "PT60M": 60,
 }
 
+
+# Every row in the store is one quarter-hour. A price published per hour (AL,
+# 2026) or per half-hour applies to each quarter-hour inside it, so it is
+# written once per quarter-hour with the same value. Nothing is invented: it is
+# the same product, and the sum over 1 MW is unchanged. Without this an hourly
+# zone has 24 rows a day, every day fails the 96-quarter completeness check,
+# and the zone never gets a decision.
+QUARTER_MIN = 15
+
 # imbalance_Price.category -> our column name.
 _CATEGORY_COLUMN = {
     "A04": "price_im_long",   # long / surplus
@@ -135,8 +144,9 @@ def _forward_fill_period(period_el) -> tuple[dict[str, dict[datetime, float]],
                     f"Category {cat}: no value for position {pos} "
                     "(curve does not start at position 1 - real gap, not A03)."
                 )
-            delivery_ts = start + timedelta(minutes=minutes * (pos - 1))
-            series[delivery_ts] = last_value
+            mtu_start = start + timedelta(minutes=minutes * (pos - 1))
+            for q in range(minutes // QUARTER_MIN):
+                series[mtu_start + timedelta(minutes=QUARTER_MIN * q)] = last_value
         series_by_cat[cat] = series
 
     return series_by_cat, explicit_counts, n_expected
