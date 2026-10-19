@@ -852,7 +852,7 @@ def test_the_recovery_command_names_the_zone():
                         "uv run python -m src.workflow_compute forecast"), cmd
 
 
-def test_a_zone_says_what_it_is_for_and_shadow_writes_nothing():
+def test_a_zone_says_what_it_is_for_and_shadow_writes_nothing(monkeypatch):
     """
     A zone joins by being watched. In shadow it runs the whole chain and stores
     nothing, so several days of log answer what no reasoning can — when the TSO
@@ -878,8 +878,12 @@ def test_a_zone_says_what_it_is_for_and_shadow_writes_nothing():
         assert writes_results(area) is (cfg.zone_mode(area) == "live"), area
         assert writes_results(area, persist=False) is False, area
 
+    # A zone without a mode, made up here rather than taken from the registry:
+    # this used to name BE, and failed on 2026-10-19 the day BE was given one —
+    # the same mistake as the RO line above, pinning the roster, not the rule.
+    monkeypatch.setattr(cfg, "zone", lambda area: {"eic": "X", "tz": "UTC"})
     try:
-        cfg.zone_mode("BE")          # in the registry, never given a mode
+        cfg.zone_mode("XX")
     except KeyError as e:
         assert "mode" in str(e), e
     else:

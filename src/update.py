@@ -147,7 +147,7 @@ def fetch_da(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
 
 def fetch_im(ps: str, pe: str, log, area: str) -> tuple[pd.DataFrame, dict]:
     """A85 for the window -> the store's IM columns + poll record."""
-    params = {"documentType": "A85", "controlArea_Domain": cfg.eic(area),
+    params = {"documentType": "A85", "controlArea_Domain": cfg.eic_im(area),
               "periodStart": ps, "periodEnd": pe}
     path = fetch_raw(params, "A85", area)
 

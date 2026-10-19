@@ -102,6 +102,20 @@ def eic(area: str) -> str:
     return str(zone(area)["eic"])
 
 
+def eic_im(area: str) -> str:
+    """
+    The EIC to ask for the zone's IMBALANCE prices — usually the same as eic().
+
+    Not always. Germany-Luxembourg trades day-ahead as one bidding zone
+    (10Y1001A1001A82H) but since 2022-06-22 publishes imbalance under DE
+    (10Y1001A1001A83F). A zone whose imbalance lives elsewhere says so with
+    "eic_im" in settings.json -> zones; the area code stays the same, so the
+    store, the logs and every published file still say DE_LU.
+    """
+    z = zone(area)
+    return str(z.get("eic_im", z["eic"]))
+
+
 def zone_tz_name(area: str) -> str:
     """IANA timezone of the market. The only place local time enters, via period."""
     return str(zone(area)["tz"])

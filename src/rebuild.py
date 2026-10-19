@@ -64,7 +64,7 @@ def raw_responses(area: str) -> list[tuple[str, str, object]]:
                 continue
         else:
             params = meta.get("params_without_token", {})
-            if not any(params.get(k) == eic for k in EIC_KEYS):
+            if not any(params.get(k) in (eic, cfg.eic_im(area)) for k in EIC_KEYS):
                 continue
         raw = meta_path.with_name(meta_path.name[: -len(SIDECAR)])
         out.append((meta["fetched_ts_utc"], meta["doc_label"], raw))

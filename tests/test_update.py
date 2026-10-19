@@ -22,6 +22,7 @@ from src.entsoe_ack import NoDataAvailable  # noqa: E402
 from src.parse_da import parse_da_xml  # noqa: E402
 from src.parse_im import parse_im_bytes  # noqa: E402
 from src.update import IM_RENAME, new_versions, split_range  # noqa: E402
+import src.config as cfg  # noqa: E402
 from src.workflow import DA_COLS, IM_COLS, _assert_utc, empty_table  # noqa: E402
 
 VALUES = ["price_im_pos", "price_im_neg"]
@@ -318,6 +319,19 @@ def test_an_hourly_imbalance_price_fills_its_four_quarters():
     df = parse_im_bytes(xml).df
     assert len(df) == 4
     assert (df["price_im_long"] == 55.0).all()
+
+def test_imbalance_can_live_under_another_code(monkeypatch):
+    """
+    DE_LU: day-ahead under 10Y1001A1001A82H, imbalance under DE
+    (10Y1001A1001A83F) since 2022-06-22. The imbalance request uses "eic_im"
+    when a zone has one, and the plain EIC when it has not.
+    """
+    zones = {"DE_LU": {"eic": "10Y1001A1001A82H", "eic_im": "10Y1001A1001A83F"},
+             "EE": {"eic": "10Y1001A1001A39I"}}
+    monkeypatch.setattr(cfg, "zone", lambda a: zones[a])
+    assert cfg.eic("DE_LU") == "10Y1001A1001A82H"
+    assert cfg.eic_im("DE_LU") == "10Y1001A1001A83F"
+    assert cfg.eic_im("EE") == "10Y1001A1001A39I"
 
 
 if __name__ == "__main__":

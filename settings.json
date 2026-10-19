@@ -15,7 +15,11 @@
     "SI",
     "SE1",
     "NO5",
-    "AL"
+    "AL",
+    "DE_LU",
+    "HR",
+    "CZ",
+    "BE"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -37,7 +41,8 @@
       "expect_currency": {
         "DA": "EUR",
         "IM": "EUR"
-      }
+      },
+      "mode": "shadow"
     },
     "FR": {
       "eic": "10YFR-RTE------C",
@@ -116,6 +121,43 @@
       "expect_currency": {
         "DA": "EUR",
         "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "DE_LU": {
+      "eic": "10Y1001A1001A82H",
+      "eic_im": "10Y1001A1001A83F",
+      "tz": "Europe/Berlin",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "HR": {
+      "eic": "10YHR-HEP------M",
+      "tz": "Europe/Zagreb",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "ME": {
+      "eic": "10YCS-CG-TSO---S",
+      "tz": "Europe/Podgorica",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "CZ": {
+      "eic": "10YCZ-CEPS-----N",
+      "tz": "Europe/Prague",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "CZK"
       },
       "mode": "shadow"
     }
