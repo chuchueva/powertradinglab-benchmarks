@@ -201,7 +201,11 @@ def _log_revisions(log, doc: str, keep: pd.DataFrame, stored: pd.DataFrame,
         was = latest.loc[r["delivery_ts"]]
         moves = ", ".join(f"{c} {was[c]:g} -> {r[c]:g}"
                           for c in value_cols if was[c] != r[c])
-        log.info("%s revised %s: %s", doc, r["delivery_ts"], moves)
+        # The unit goes with the numbers: CZ and RO publish imbalance in CZK
+        # and RON, and a bare 6185 reads like a price spike in EUR when it is
+        # about 250 EUR (found 2026-10-20).
+        log.info("%s revised %s: %s %s", doc, r["delivery_ts"], moves,
+                 r.get("currency") or "")
     if len(changed) > REVISIONS_SHOWN:
         log.info("%s revised %d more PTU, not listed", doc,
                  len(changed) - REVISIONS_SHOWN)
@@ -315,8 +319,9 @@ def update(day_from: date, day_to: date, area: str, log=None) -> pd.DataFrame:
         # rather than concatenating them onto nothing.
         updated[doc] = (keep[cols].reset_index(drop=True) if store.empty
                         else pd.concat([store, keep], ignore_index=True)[cols])
-        log.info("%s %s %s..%s: %d rows returned, %d new, %d revised",
-                 area, doc, day_from, day_to, len(fresh), n_new, n_changed)
+        log.info("%s %s %s..%s: %d rows returned, %d new, %d revised (%s)",
+                 area, doc, day_from, day_to, len(fresh), n_new, n_changed,
+                 rec["currency"] or "no currency")
 
     write_store(updated.get("A44", da_stored), updated.get("A85", im_stored), area)
     _append_polls(polls, area)
