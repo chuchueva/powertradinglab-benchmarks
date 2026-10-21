@@ -211,6 +211,37 @@ def test_forecasts_obey_the_public_floor_and_the_newest_wins():
     csv = S._csv_forecasts(rows)
     assert "NL,2026-09-17,2026-09-16T11:00:00Z,96,0,96,0,2026-09-15T00:00:00Z,," in csv
 
+def test_a_month_is_the_sum_of_its_days_and_settles_once():
+    """
+    The monthly line is the sum of the daily lines a reader can see - nothing
+    recomputed - and it is final only when every day of the month has its
+    as-final pass. Before that it is open: a running total, labelled so.
+    """
+    sep = pd.concat([_day("2026-09-01", "2026-09-02 09:40", seed=1),
+                     _day("2026-09-02", "2026-09-03 09:40", seed=2, acted=False)])
+    rows = _collect(sep)
+    m = S.monthly(rows)
+    assert len(m) == 1
+    line = m.iloc[0]
+    assert line["status"] == "open"
+    assert line["days_in_month"] == 30 and line["days_scored"] == 2
+    assert line["days_with_decision"] == 1
+    for c in S.VALUE_COLS:
+        assert abs(line[c] - rows[c].sum()) < 1e-9, c
+
+    # The as-final pass for both days, on the 20th of October: now it settles.
+    final = pd.concat([sep,
+                       _day("2026-09-01", "2026-10-20 09:40", seed=1),
+                       _day("2026-09-02", "2026-10-20 09:40", seed=2, acted=False)])
+    m = S.monthly(_collect(final))
+    assert m.iloc[0]["status"] == "final"
+
+
+def test_a_month_without_any_decision_has_an_empty_trailing_bias():
+    """Empty, not zero: no decision is not a result of zero."""
+    rows = _collect(_day("2026-09-01", "2026-09-02 09:40", acted=False))
+    assert pd.isna(S.monthly(rows).iloc[0]["trailing_bias_value"])
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

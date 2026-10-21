@@ -132,6 +132,25 @@ FORECAST_COLUMNS = {
                    "per-period actions are there.",
 }
 
+MONTHLY_COLS = (["zone", "month", "status", "days_in_month", "days_scored",
+                 "days_with_decision"] + VALUE_COLS + ["knownby_ts"])
+MONTHLY_COLUMNS = {
+    "zone": "Bidding zone code.",
+    "month": "Calendar month of the delivery days, in the zone's own market "
+             "time, YYYY-MM.",
+    "status": "final: every scored day of the month has had its as-final pass "
+              "(from the 20th of the following month) - the month is settled "
+              "and will not move. open: the month so far, a running total that "
+              "changes every day until it settles.",
+    "days_in_month": "Calendar days in the month.",
+    "days_scored": "Delivery days with a row in <zone>_scores.csv. Fewer than "
+                   "days_in_month means the source left days out, or the month "
+                   "is still running; a missing day is never filled.",
+    "days_with_decision": "Days on which trailing_bias_value carries a decision.",
+    "knownby_ts": "The newest instant among the month's rows: everything in the "
+                  "line was knowable then.",
+}
+
 TERMS = ("Free to use with attribution. Derived values only: no day-ahead or "
          "imbalance prices are republished here or anywhere else in this "
          "dataset.")
@@ -182,6 +201,46 @@ def collect(log) -> pd.DataFrame:
                          "methodology_version": int(g["methodology_version"].iloc[0]),
                          "source_file": rel(path) if path.exists() else ""})
     return pd.DataFrame(rows, columns=COLS).sort_values(["zone", "delivery_day"])
+
+
+def monthly(rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    One row per zone and calendar month: the sums of the daily rows.
+
+    Nothing is recomputed - the month is the sum of exactly the rows a reader
+    finds in <zone>_scores.csv, so the two can never disagree. A month is final
+    when every one of its days carries its as-final pass, the same test the
+    daily rows use for their `pass`; until then it is open, a running total.
+    Settled months are what a settlement statement would show; the open one is
+    there so the site can show the month so far, labelled as such.
+    """
+    if rows.empty:
+        return pd.DataFrame(columns=MONTHLY_COLS)
+    day = pd.to_datetime(rows["delivery_day"])
+    if day.dt.tz is not None:
+        day = day.dt.tz_localize(None)
+    r = rows.assign(month=day.dt.to_period("M"))
+    out = []
+    for (zone, month), g in r.groupby(["zone", "month"]):
+        out.append({
+            "zone": zone, "month": month,
+            "status": "final" if (g["pass"] == "as-final").all() else "open",
+            "days_in_month": int(month.days_in_month),
+            "days_scored": int(len(g)),
+            "days_with_decision": int((g["ptu_with_action"] > 0).sum()),
+            **{c: g[c].sum(min_count=1) for c in VALUE_COLS},
+            "knownby_ts": g["knownby_ts"].max(),
+        })
+    return pd.DataFrame(out, columns=MONTHLY_COLS).sort_values(["zone", "month"])
+
+
+def _csv_monthly(df: pd.DataFrame) -> str:
+    out = df.copy()
+    for c in VALUE_COLS:
+        out[c] = out[c].map(lambda v: "" if pd.isna(v) else f"{float(v):.{DECIMALS}f}")
+    out["month"] = out["month"].map(str)
+    out["knownby_ts"] = out["knownby_ts"].map(_ts)
+    return out[MONTHLY_COLS].to_csv(index=False, lineterminator="\n")
 
 
 def _floor():
@@ -307,6 +366,10 @@ def _index_json(rows: pd.DataFrame) -> str:
         "benchmarks": DEFINITIONS,
         "columns": COLUMNS,
         "forecast_columns": FORECAST_COLUMNS,
+        "monthly_granularity": "one row per zone per calendar month: the sums "
+                               "of that zone's daily rows; final once settled, "
+                               "open while running",
+        "monthly_columns": MONTHLY_COLUMNS,
         "zones": sorted(rows["zone"].unique().tolist()),
         "files": files,
     }, indent=2, sort_keys=False) + "\n"
@@ -329,6 +392,18 @@ def build(log=None) -> int:
                            (f"{zone}_scores-latest.csv", g.tail(1))):
             if _put(V1 / name, _csv(part)):
                 changed.append(name)
+
+    # Months: the sums of the daily rows above, settled or running. The
+    # front-page file carries each zone's last SETTLED month only.
+    mon = monthly(rows)
+    for zone, g in mon.groupby("zone"):
+        name = f"{zone}_scores-monthly.csv"
+        if _put(V1 / name, _csv_monthly(g)):
+            changed.append(name)
+    settled = (mon[mon["status"] == "final"].groupby("zone").tail(1)
+               .sort_values("zone"))
+    if _put(V1 / "scores-monthly-latest.csv", _csv_monthly(settled)):
+        changed.append("scores-monthly-latest.csv")
 
     latest = rows.groupby("zone").tail(1).sort_values("zone")
     for name, text in (("scores-latest.csv", _csv(latest)),
