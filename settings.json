@@ -19,7 +19,8 @@
     "DE_LU",
     "HR",
     "CZ",
-    "BE"
+    "BE",
+    "CH"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -158,6 +159,15 @@
       "expect_currency": {
         "DA": "EUR",
         "IM": "CZK"
+      },
+      "mode": "shadow"
+    },
+    "CH": {
+      "eic": "10YCH-SWISSGRIDZ",
+      "tz": "Europe/Zurich",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
       },
       "mode": "shadow"
     }
