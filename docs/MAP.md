@@ -67,7 +67,7 @@ and it must finish before the 12:00 market-local auction gate), `catchup` at
 | `workflow_compute.py` | forecast / score | a day is scored exactly twice, and never forecast on a day that is not whole |
 | `publish.py` | rendering the tables as published XML | a published file is frozen; it computes nothing — including the version, which is read from the row |
 | `status.py` | `outputs/status.xml` | the ONE mutable file, and facts only — no self-assessment |
-| `summary.py` | `outputs/v1/` — scores and forecasts, one row per zone per day | derived values only; nothing before `publication.public_from`; no wall clock |
+| `summary.py` | `outputs/v1/` — scores and forecasts, one row per zone per day; monthly sums of the same rows | derived values only; nothing before `publication.public_from`; no wall clock |
 | `site_push.py` | the public data, pushed to `powertradinglab-site/data/` | only v1, status and the archive files v1 cites; a mirror, rebuilt every run |
 | `backup.py` | the off-machine copy | dated snapshots, written atomically |
 | `config.py` | `settings.json` | every tunable number lives in json, not in code |
