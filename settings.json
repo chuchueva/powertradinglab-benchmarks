@@ -78,7 +78,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "SK": {
       "eic": "10YSK-SEPS-----K",
@@ -96,7 +96,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "SE1": {
       "eic": "10Y1001A1001A44P",
@@ -105,7 +105,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "NO5": {
       "eic": "10Y1001A1001A48H",
@@ -123,7 +123,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "DE_LU": {
       "eic": "10Y1001A1001A82H",
@@ -133,7 +133,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "HR": {
       "eic": "10YHR-HEP------M",
