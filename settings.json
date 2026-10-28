@@ -1,7 +1,7 @@
 {
   "publication": {
     "schema_version": 6,
-    "methodology_version": 3,
+    "methodology_version": 4,
     "publisher_name": "PowerTradingLab",
     "publisher_url": "https://powertradinglab.org",
     "public_from": "2026-09-17"
