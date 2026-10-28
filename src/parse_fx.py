@@ -19,9 +19,18 @@ Output: data/processed/fx_daily.feather, one row per (currency, calendar day):
                 'eur'      = EUR itself, always 1.0)
 
 Design / decisions:
-  - UTC-only: rate_date is tz-aware UTC midnight. No `knownby_ts` here - ECB rates
-    are a canonical daily reference, not snapshotted/revised like our price feeds,
-    so the date IS the key. Provenance is the ECB file itself.
+  - UTC-only: rate_date is tz-aware UTC midnight; key = (currency, rate_date).
+  - knownby_ts: when the rate became known (2026-10-27). Needed because the live
+    forecast values TODAY's intraday hours at the last rate known at the
+    decision (methodology, owner's choice (b)), and a decision must be
+    reproducible later. Two sources, one cut-over:
+      rate_date >= the first saved ECB fetch (2026-09-22): the fetch time of the
+        first file in data/raw that carried the rate — what we actually saw;
+      earlier: the publication instant by rule, 17:00 Brussels on rate_date
+        (ECB_PUBLISH_LOCAL; observed publication is about 16:00).
+    A carried row (ffill) is known when the rate it carries is. EUR and the
+    pegs are known from the start of the calendar. ECB rates are not revised
+    (0 revisions in 75 saved fetches, 2026-09-22..10-27), so one version per key.
   - ECB publishes on business days only. We forward-fill each currency over the
     calendar (weekends/holidays), but ONLY within that currency's own active span
     (first..last observed date) - never before it appears nor after it stops
@@ -135,6 +144,42 @@ def _closed_run_after(last: date) -> list[date]:
     return out
 
 
+RAW_GLOB = str(ROOT / "data/raw/*/*/ECB_eurofxref-hist-90d_*.xml")
+
+
+def publication_ts(rate_date: pd.Series) -> pd.Series:
+    """The rule-based instant a rate dated `rate_date` is published (UTC)."""
+    local = (rate_date.dt.tz_localize(None).dt.normalize()
+             + pd.Timedelta(hours=ECB_PUBLISH_LOCAL.hour, minutes=ECB_PUBLISH_LOCAL.minute))
+    return local.dt.tz_localize(ECB_TZ).dt.tz_convert("UTC")
+
+
+def raw_first_seen(pattern: str = RAW_GLOB) -> pd.DataFrame:
+    """(currency, rate_date, knownby_ts): the first saved fetch that carried each rate."""
+    parts = []
+    for path in sorted(glob.glob(pattern)):
+        d = parse_ecb_gesmes(path)
+        stamp = Path(path).stem.rsplit("_", 1)[-1]
+        d["knownby_ts"] = pd.Timestamp(datetime.strptime(stamp, "%Y%m%dT%H%M%SZ"), tz="UTC")
+        parts.append(d)
+    if not parts:
+        return pd.DataFrame(columns=["currency", "rate_date", "knownby_ts"])
+    a = pd.concat(parts, ignore_index=True)
+    return a.groupby(["currency", "rate_date"], as_index=False)["knownby_ts"].min()
+
+
+def knownby_for(obs: pd.DataFrame, first_seen: pd.DataFrame) -> pd.Series:
+    """knownby_ts per observation: saved fetch in the raw era, rule before it."""
+    rule = publication_ts(obs["rate_date"])
+    if first_seen.empty:
+        return rule
+    cut = first_seen["knownby_ts"].min().normalize()
+    seen = obs.merge(first_seen, how="left", on=["currency", "rate_date"])["knownby_ts"]
+    seen.index = obs.index
+    raw_era = (obs["rate_date"] >= cut) & seen.notna()
+    return rule.where(~raw_era, seen)
+
+
 def parse_ecb_gesmes(path: str) -> pd.DataFrame:
     """Parse one ECB gesmes XML into long records: rate_date (UTC), currency, rate."""
     tree = etree.parse(path)
@@ -162,12 +207,18 @@ def _read_all_observations() -> pd.DataFrame:
     return obs
 
 
-def build_fx_daily(obs: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Build the full daily FX table (ffilled ECB + EUR + pegs).
+def build_fx_daily(obs: pd.DataFrame | None = None,
+                   first_seen: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Build the full daily FX table (ffilled ECB + EUR + pegs), with knownby_ts.
 
-    `obs` defaults to every ECB file under data/fx; passing it is for tests.
+    `obs` defaults to every ECB file under data/fx, `first_seen` to the saved
+    fetches under data/raw; passing them is for tests (no first_seen = rule only).
     """
-    obs = _read_all_observations() if obs is None else obs
+    if obs is None:
+        obs = _read_all_observations()
+        first_seen = raw_first_seen() if first_seen is None else first_seen
+    obs = obs.assign(knownby_ts=knownby_for(
+        obs, first_seen if first_seen is not None else pd.DataFrame()))
     start, last_pub = obs["rate_date"].min(), obs["rate_date"].max()
     # The table runs past the last publication over the CLOSED days that follow
     # it, and no further: a Friday rate covers Saturday and Sunday, a rate of
@@ -181,20 +232,23 @@ def build_fx_daily(obs: pd.DataFrame | None = None) -> pd.DataFrame:
 
     # ECB currencies: forward-fill within each currency's own active span.
     for cur, g in obs.groupby("currency"):
-        s = g.set_index("rate_date")["rate"].sort_index()
+        g = g.set_index("rate_date").sort_index()
+        s = g["rate"]
         # A currency still quoted on the last publication carries over the
         # closed days after it; a retired one (HRK) stops at its own last quote.
         until = end if s.index.max() == last_pub else s.index.max()
         active = cal[(cal >= s.index.min()) & (cal <= until)]
         r = s.reindex(active).ffill()
+        k = g["knownby_ts"].reindex(active).ffill()
         source = pd.Series("ffill", index=active)
         source.loc[s.index.intersection(active)] = "ecb"
         parts.append(pd.DataFrame({"rate_date": active, "currency": cur,
-                                   "rate": r.to_numpy(), "source": source.to_numpy()}))
+                                   "rate": r.to_numpy(), "source": source.to_numpy(),
+                                   "knownby_ts": k.to_numpy()}))
 
     # EUR itself, always 1.0 across the whole calendar.
     parts.append(pd.DataFrame({"rate_date": cal, "currency": "EUR",
-                               "rate": 1.0, "source": "eur"}))
+                               "rate": 1.0, "source": "eur", "knownby_ts": start}))
 
     fx = pd.concat(parts, ignore_index=True)
 
@@ -204,7 +258,8 @@ def build_fx_daily(obs: pd.DataFrame | None = None) -> pd.DataFrame:
         missing = cal[~cal.isin(have)]
         if len(missing):
             parts.append(pd.DataFrame({"rate_date": missing, "currency": cur,
-                                       "rate": val, "source": "peg"}))
+                                       "rate": val, "source": "peg",
+                                       "knownby_ts": start}))
 
     # Euro-legacy tail: fill the gap between the last ECB quote and euro adoption
     # with the locked conversion rate (e.g. HRK's 2022-12-31).
@@ -219,12 +274,43 @@ def build_fx_daily(obs: pd.DataFrame | None = None) -> pd.DataFrame:
         gap = [d for d in gap if d not in have]
         if gap:
             parts.append(pd.DataFrame({"rate_date": gap, "currency": cur,
-                                       "rate": spec["conv_rate"], "source": "euro_conv"}))
+                                       "rate": spec["conv_rate"], "source": "euro_conv",
+                                       "knownby_ts": start}))
 
     fx = pd.concat(parts, ignore_index=True)
 
     fx = fx.sort_values(["currency", "rate_date"]).reset_index(drop=True)
     return fx
+
+
+def fx_as_of(fx: pd.DataFrame, current_ts: pd.Timestamp) -> pd.DataFrame:
+    """
+    The FX table as it stood at current_ts, for the LIVE path.
+
+    1. as_of: only rates known strictly before current_ts.
+    2. Each currency's last known rate is carried onto the following dates up
+       to today (UTC) — but only if NONE of those dates' own rate is due yet
+       (`rate_due`). That is the owner's rule (b), 2026-10-27: today's intraday
+       hours are valued at the last rate a trader actually knows. A rate that
+       is due and missing (a failed fetch, a retired currency) is not carried:
+       that stays a refusal, as before. Carried rows: source "carried",
+       knownby_ts of the rate they carry.
+    """
+    fx = fx.loc[fx["knownby_ts"] < current_ts]
+    today = current_ts.tz_convert("UTC").normalize()
+    now = current_ts.to_pydatetime()
+    add = []
+    for cur, g in fx.groupby("currency"):
+        last = g.loc[g["rate_date"].idxmax()]
+        dates = pd.date_range(last["rate_date"] + pd.Timedelta(days=1), today,
+                              freq="D", tz="UTC")
+        if len(dates) == 0 or any(rate_due(d.date(), now) for d in dates):
+            continue
+        add.append(pd.DataFrame({"rate_date": dates, "currency": cur,
+                                 "rate": last["rate"], "source": "carried",
+                                 "knownby_ts": last["knownby_ts"]}))
+    out = pd.concat([fx, *add], ignore_index=True) if add else fx.copy()
+    return out.sort_values(["currency", "rate_date"]).reset_index(drop=True)
 
 
 def main() -> None:

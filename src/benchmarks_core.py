@@ -1,24 +1,29 @@
 """
-Benchmark CORE — pure functions, no I/O. One implementation shared by:
-  - the report generator (report/benchmarks.py), and
-  - the live NL workflow (score / forecast).
+Benchmark CORE — pure functions, no I/O. Shared by the report
+(report/benchmarks.py), the live workflow (score) and the model checks.
 
-Pipeline (per zone, all per 1 MW, EUR, UTC):
     da, im = as_of(da, current_ts), as_of(im, current_ts)   # live path only
     matrix = build_matrix(da, im, fx, on=...)      # DA + IM(EUR) per 15-min PTU
-    matrix = add_pnl(matrix)                         # always_buy/sell, ideal, devil
-    actions = forecast_actions(matrix, n_days)       # hourly trailing-bias -> +1/-1
-    matrix = apply_actions(matrix, actions)          # stat_action_pnl per PTU
+    matrix = add_pnl(matrix)                       # always_buy/sell, ideal, devil
+    action_pnl(action, always_buy, always_sell)    # what an action earned
 
-These mirror report/benchmarks.py exactly, extracted so both the report and
-the workflow call the SAME code. Definitions: docs/METHOD.md.
+The trailing-bias DECISION is not here. It lives in models/trailing_bias.py
+and runs on the matrix from models/features.py — the same two for the live
+forecast, the backtest and training. One exception, kept for the report:
+
+    actions = forecast_actions(matrix, n_days)     # report only, shift(lag_days)
+    matrix = apply_actions(matrix, actions)        # stat_action_pnl per PTU
+
+forecast_actions is the report's shortcut (d1 = the day before yesterday,
+hard-coded as shift(2)); tests/test_models.py checks that it agrees with the
+matrix backtest hour by hour. It goes when the report moves to the matrix.
+Definitions: docs/METHOD.md.
 
 The two ways to be causal — pick ONE, never both:
-  - as_of(df, current_ts): the canonical rule. Keeps only what was actually
-    published by current_ts, so the lag emerges from reality. Used by the live
-    workflow, which then calls forecast_actions with lag_days=0.
+  - as_of(df, current_ts): keeps only what was published by current_ts, so the
+    lag emerges from reality. The live workflow.
   - lag_days=2 in forecast_actions: the backtest shortcut that hardcodes the
-    same 48 h. Used by the report, which does not filter by knownby_ts.
+    same 48 h. The report, which does not filter by knownby_ts.
 Applying the filter AND the shift would lag the signal twice over.
 
 Notes:
@@ -237,47 +242,26 @@ def forecast_actions(m: pd.DataFrame, n_days: int, lag_days: int = 2) -> pd.Data
                          "stat_action": action})
 
 
-def signal_for(m: pd.DataFrame, n_days: int, target_hours) -> pd.DataFrame:
+def action_pnl(action, always_buy, always_sell) -> np.ndarray:
     """
-    Same signal, aimed at hours NOT in `m` — the live counterpart.
+    What an action earned, per 1 MW — the ONE place this is computed
+    (live score, report, model checks).
 
-    forecast_actions can only label hours that already exist in the matrix; a
-    forecast is for a delivery day that by definition has no rows yet. So here
-    the window is taken from the END of what is available: per hour-of-day, the
-    last n_days observations, mean of always_buy vs always_sell -> +1 / -1.
-
-    `m` MUST already be as_of-filtered — there is no shift here, because the
-    filter is the lag. Whatever gap reality left between the last settled day
-    and the target day is reported in `data_through`, not assumed.
-
-    Returns one row per target hour:
-        hour_ts, stat_action (Int8, <NA> if the window is short),
-        sig_buy, sig_sell, n_obs, data_through
+        +1    -> always_buy   (bought on the day-ahead)
+        -1    -> always_sell  (sold on the day-ahead)
+         0    -> 0.0          (decided to stay out: no position, no pnl)
+        <NA>  -> NaN          (no decision was possible)
     """
-    target = pd.DataFrame({"hour_ts": pd.DatetimeIndex(target_hours)})
-    target["hod"] = target["hour_ts"].dt.hour
-
-    tail = _hourly(m).sort_values("hour_ts").groupby("hod", as_index=False).tail(n_days)
-    sig = (tail.groupby("hod")
-               .agg(sig_buy=("always_buy", "mean"),
-                    sig_sell=("always_sell", "mean"),
-                    n_obs=("hour_ts", "size"),
-                    data_through=("hour_ts", "max"))
-               .reset_index())
-
-    out = target.merge(sig, how="left", on="hod")
-    # A short window is NOT a -1: an unformed signal must stay unformed.
-    full = (out["n_obs"] == n_days).to_numpy()
-    action = pd.array(np.where(out["sig_buy"] > out["sig_sell"], 1, -1), dtype="Int8")
-    action[~full] = pd.NA
-    return out.assign(stat_action=action,
-                      n_obs=out["n_obs"].astype("Int64")).drop(columns=["hod"])
+    act = pd.array(action, dtype="Float64").to_numpy(dtype="float64", na_value=np.nan)
+    return np.where(act == 1, np.asarray(always_buy, dtype=float),
+                    np.where(act == -1, np.asarray(always_sell, dtype=float),
+                             np.where(act == 0, 0.0, np.nan)))
 
 
 def apply_actions(m: pd.DataFrame, actions: pd.DataFrame) -> pd.DataFrame:
-    """Attach the chosen action's realised pnl per PTU (stat_action_pnl)."""
+    """Attach the chosen action's realised pnl per PTU (stat_action_pnl).
+    An hour without an action is NaN now, not a sell (2026-10-28)."""
     m = m.assign(hour_ts=m["delivery_ts"].dt.floor("h"))
     m = m.merge(actions, how="left", on="hour_ts", validate="many_to_one")
-    m["stat_action_pnl"] = np.where(m["stat_action"] == 1,
-                                    m["always_buy"], m["always_sell"])
+    m["stat_action_pnl"] = action_pnl(m["stat_action"], m["always_buy"], m["always_sell"])
     return m

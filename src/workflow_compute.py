@@ -59,7 +59,7 @@ import pandas as pd
 
 import src.benchmarks_core as C
 import src.config as cfg
-from src.parse_fx import rate_due
+from src.parse_fx import fx_as_of, rate_due
 from src.period import auction_gate, market_day_bounds, market_tz
 from src.workflow import (PROCESSED, ROOT, for_each_area, load_store,
                           setup_logging, store_dir)
@@ -142,10 +142,12 @@ def _publisher_cols() -> dict:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _load_fx() -> pd.DataFrame:
-    """Daily FX table. NL is EUR-only, but build_matrix converts both legs
-    uniformly and EUR is in the table at rate 1.0 — so no special case here."""
-    return pd.read_feather(os.path.join(PROCESSED, "fx_daily.feather"))
+def _load_fx(current_ts: pd.Timestamp) -> pd.DataFrame:
+    """Daily FX table as it stood at current_ts (parse_fx.fx_as_of): rates
+    known before it, the last known rate carried onto today's not-yet-due
+    dates. EUR is a unit and never looked up (build_matrix)."""
+    fx = pd.read_feather(os.path.join(PROCESSED, "fx_daily.feather"))
+    return fx_as_of(fx, current_ts)
 
 
 def _as_of_legs(current_ts: pd.Timestamp, area: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -169,7 +171,7 @@ def _matrix_from_legs(da: pd.DataFrame, im: pd.DataFrame,
     # The live path DROPS what it cannot value instead of raising: a missing
     # rate for one day must not take the zone down, it must make that day
     # incomplete — and the gates below already know what incomplete means.
-    m = C.build_matrix(da, im, _load_fx(), on=["delivery_ts"], on_missing_fx="drop")
+    m = C.build_matrix(da, im, _load_fx(current_ts), on=["delivery_ts"], on_missing_fx="drop")
     missing = m.attrs.get("fx_missing", [])
     if missing and log is not None:
         for d in sorted({t[2] for t in missing}):
@@ -287,44 +289,29 @@ def _parse_ts(text: str | None) -> pd.Timestamp:
 
 
 # --------------------------------------------------------------------------- #
-# The input gate
+# The input window
 # --------------------------------------------------------------------------- #
-# A forecast for tomorrow stands on the day that ended last night. When that day
-# is missing, the trailing window does NOT get shorter — it silently shifts back:
-# signal_for takes the last n_days observations per hour-of-day from the END of
-# whatever is there, so n_obs stays at n_days and the short-window guard cannot
-# fire. The forecast comes out formed and confident, built on evidence a day
-# older than it appears to be.
+# A forecast for tomorrow stands on a window of n_days observations per UTC
+# hour, built by models/features.py and tied to TIMESTAMPS: d1 is today's hour
+# if it is whole and known (zones that publish imbalance intraday), otherwise
+# yesterday's; d2, d3 are exactly one and two days before d1. A hole anywhere
+# is an <NA> in a named cell, and the hour gets no action.
 #
-# Observed on 2026-08-30: ENTSO-E answered HTTP 200 with 08-29 simply absent, the
-# retries saw a healthy poll and stopped, and the forecast for 08-31 was issued
-# on a window ending 08-28. The only trace was data_through repeating the
-# previous run's value — true, recorded, and read by nobody.
+# What this replaced, and why (kept because the failures are the reasons):
+# signal_for took the last n_days observations from the END of whatever was in
+# the store. A missing day did not shorten the window, it SHIFTED it, with
+# n_obs still reading n_days — 2026-08-30 (08-29 absent) and 2026-09-15 (09-13
+# absent in the middle). The per-hour gate added on 2026-09-26 caught holes,
+# but not surplus: a partly published hour of TODAY entered the window as d1
+# (found 2026-10-27, DE_LU / SE1 / SI 09:00 UTC daily).
 #
-# Hence: the check is on the FRESHNESS and COMPLETENESS of the input, never on
-# n_obs, which is blind to exactly this failure. And the day is either whole or
-# unused — a forecast on a fraction of a day is not the method this project
-# publishes.
-#
-# The check covers the WHOLE window, not just its newest day, and that took a
-# second lesson to learn (2026-09-15). Day-ahead for Sunday 09-13 was never
-# published; the newest input day was fine, so a one-day gate opened, and the
-# signal quietly reached past the hole to 09-11 — three days of evidence spread
-# over four, n_obs still reading 3. The hole simply moved from the edge of the
-# window to its middle, and the same blindness applied.
-#
-# One missing day therefore refuses n_days forecasts in a row, because it sits
-# in that many consecutive windows. That is the accepted price. The alternative
-# is averaging across the gap, and at this volatility that is fitting rather
-# than measuring — so no interpolation, and no tolerance that would have to be
-# justified by a number nobody can defend.
+# One missing day still refuses n_days forecasts in a row, because it sits in
+# that many consecutive windows. That is the accepted price: no interpolation.
 #
 # A refused day is refused for good. _target_grid always aims at "tomorrow
-# relative to the run", so no later run can target it again: by then its hours
-# are already delivering, and issuing an action for them is the non-causality
-# that as_of exists to prevent. The one way back is a manual backfill and a
-# re-run on the SAME day, while tomorrow is still the same tomorrow — which is
-# what the refusal writes into the log, as a command to run.
+# relative to the run", so no later run can target it again. The one way back
+# is a manual backfill and a re-run on the SAME day, before the gate — which
+# is what the refusal writes into the log, as a command to run.
 def input_day_for(current_ts: pd.Timestamp, area: str) -> date:
     """The market day a forecast stands on: yesterday, market-local."""
     return current_ts.astimezone(market_tz(area)).date() - timedelta(days=1)
@@ -351,12 +338,6 @@ def signal_window(need: date, n_days: int) -> list[date]:
     return [need - timedelta(days=i) for i in range(n_days)]
 
 
-def window_completeness(m: pd.DataFrame, need: date, area: str,
-                        n_days: int) -> list[tuple[date, int, int]]:
-    """(day, PTU usable, PTU expected) for every day of the signal's window."""
-    return [(d, *day_completeness(m, d, area)) for d in signal_window(need, n_days)]
-
-
 def hour_grid(day: date, area: str) -> pd.Series:
     """How many PTU each UTC hour of one market day is supposed to hold.
 
@@ -367,42 +348,6 @@ def hour_grid(day: date, area: str) -> pd.Series:
     start, end = market_day_bounds(day, area)
     grid = pd.date_range(start, end, freq="15min", inclusive="left")
     return pd.Series(1, index=grid).groupby(grid.hour).size()
-
-
-def incomplete_hours(m: pd.DataFrame, need: date, area: str,
-                     n_days: int) -> dict[int, list[tuple[date, int, int]]]:
-    """
-    UTC hour-of-day -> the window days in which that hour is short.
-
-    The granularity the METHOD works on. The signal is a mean per hour-of-day
-    over the last n_days observations of that hour, so what an hour needs is its
-    own four quarters in each of those days — and what it does not care about is
-    whether some other hour of the same day is short.
-
-    The whole-day rule this replaces was written against a missing DAY, which
-    does real damage: `signal_for` takes the last n_days observations from the
-    END of what exists, so an absent day does not shorten the window, it SHIFTS
-    it, silently, with n_obs still reading n_days (2026-08-30, and again
-    2026-09-15 with the hole in the middle). A missing QUARTER-HOUR shifts
-    nothing. It leaves one hour of one day resting on three quarters instead of
-    four — and on 2026-09-25 that cost RO three refused forecasts for 1/96 of a
-    day, because the day sits in three consecutive windows.
-
-    An absent day is still caught, and by the same rule rather than a second
-    one: every hour of it is short, so no hour of the window forms, and the day
-    is refused exactly as before. The old behaviour is the special case.
-    """
-    bad: dict[int, list[tuple[date, int, int]]] = {}
-    hours = m["delivery_ts"].dt.hour
-    for d in signal_window(need, n_days):
-        start, end = market_day_bounds(d, area)
-        of_day = (m["delivery_ts"] >= start) & (m["delivery_ts"] < end)
-        have = hours.loc[of_day].value_counts()
-        for hod, expect in hour_grid(d, area).items():
-            n = int(have.get(hod, 0))
-            if n < expect:
-                bad.setdefault(int(hod), []).append((d, n, int(expect)))
-    return bad
 
 
 def leg_completeness(leg: pd.DataFrame, day: date, area: str) -> int:
@@ -536,6 +481,24 @@ def _hour_detail(bad: dict) -> str:
         for hod, shorts in sorted(bad.items()))
 
 
+def _bad_cells(x: pd.DataFrame, area: str,
+               n_days: int) -> dict[int, list[tuple[date, int, int]]]:
+    """UTC hour-of-day -> (market day, PTU present, 4) for every SHORT window
+    cell (fewer than 4 quarter-hours) of an unformed matrix row. A whole cell
+    in an unformed row is a consequence, not a cause, and is not listed."""
+    bad: dict[int, list[tuple[date, int, int]]] = {}
+    for _, r in x[x["action"].isna()].iterrows():
+        hod = int(r["delivery_ts"].hour)
+        for k in range(1, n_days + 1):
+            if int(r[f"ptu_d{k}"]) < 4:
+                ts = r[f"delivery_ts_d{k}"]
+                day = ts.tz_convert(market_tz(area)).date()
+                cell = (day, int(r[f"ptu_d{k}"]), 4)
+                if cell not in bad.setdefault(hod, []):
+                    bad[hod].append(cell)
+    return bad
+
+
 def _refuse_after_gate(target_day: date, gate: pd.Timestamp,
                        current_ts: pd.Timestamp) -> tuple[str, str]:
     """skip_reason and log sentence for a decision that is simply too late."""
@@ -572,46 +535,45 @@ def forecast(current_ts: pd.Timestamp, area: str,
         return _no_forecast(current_ts, area, ptus, m, reason, detail,
                             n_days, log, persist)
 
-    # And is the evidence there — per HOUR, which is the granularity the signal
-    # is computed on. An hour whose four quarters are whole in every day of the
-    # window gets an action; an hour with a hole anywhere in the window gets
-    # none. A day absent altogether fails every hour and is refused entire, as
-    # it always was.
-    bad = incomplete_hours(m, need, area, n_days)
-    target_hours = set(ptus.hour.unique())
-    if bad and target_hours <= set(bad):
-        missing = sorted({(d, h, e) for shorts in bad.values() for d, h, e in shorts})
-        days = sorted({d for d, _, _ in missing})
+    # The signal comes from the MATRIX (models/features.py): one row per
+    # delivery hour, the window tied to timestamps — d1 is today's hour if it
+    # is whole, else yesterday's; d2, d3 exactly one and two days before d1.
+    # A hole anywhere in the window is an <NA> in a named cell, and the rule
+    # (models/trailing_bias.py) then issues no action for that hour. The same
+    # two functions build the training matrix, so live and backtest share them.
+    # (Imported here: models.features imports this module.)
+    from models.features import matrix_from
+    from models.trailing_bias import decide
+    x = decide(matrix_from(m, current_ts, area, fresh=True), n_days)
+
+    # Hours the window could not support, as {hod: [(market day, ptu, 4)]}
+    # from the cells that are <NA> — the shape the reason writers read.
+    bad = _bad_cells(x, area, n_days)
+    if bad and x["action"].isna().all():
+        days = sorted({d for shorts in bad.values() for d, _, _ in shorts})
         per_day = [(d, *day_completeness(m, d, area)) for d in days]
         reason, detail = _refuse_incomplete(need, per_day, area, n_days, da, im)
         return _no_forecast(current_ts, area, ptus, m, reason, detail,
                             n_days, log, persist)
 
-    sig = C.signal_for(m, n_days, ptus.floor("h").unique())
-
+    sig = x[["delivery_ts", "action", "sig_buy", "sig_sell", "n_obs",
+             "data_through"]].rename(columns={"delivery_ts": "hour_ts"})
     out = (pd.DataFrame({"delivery_ts": ptus})
              .assign(hour_ts=lambda d: d["delivery_ts"].dt.floor("h"))
              .merge(sig, how="left", on="hour_ts")
-             .rename(columns={"stat_action": "action"})
              .assign(knownby_ts=current_ts, area=area, n_days=n_days,
                      skip_reason=pd.NA, **_version_cols(), **_param_cols(),
                      **_publisher_cols()))
 
-    # Hours the window could not support: the signal for them would be computed
-    # on a shifted or short window, so the action is withdrawn and the row says
-    # why. This is the PARTIAL case — some hours decided, some not — and it is
-    # the one the whole-day rule used to turn into a lost day.
+    # The PARTIAL case — some hours decided, some not.
     if bad:
-        short_hours = sorted(bad)
-        mask = out["delivery_ts"].dt.hour.isin(short_hours)
+        mask = out["action"].isna()
         legs = _short_legs(bad, area, da, im)
-        out.loc[mask, "action"] = pd.NA
         out.loc[mask, "skip_reason"] = _hour_reason(bad, legs)
-        log.warning("forecast %s @ %s: %d of 24 hours refused — %s. The rest of "
+        log.warning("forecast %s @ %s: %d of %d hours refused — %s. The rest of "
                     "the day is decided; an hour needs its four quarters in "
-                    "every day of the window, and these did not have them.",
-                    area, current_ts, len(short_hours),
-                    _hour_detail(bad))
+                    "every day of its window, and these did not have them.",
+                    area, current_ts, len(bad), len(x), _hour_detail(bad))
 
     if persist:
         _append(FORECASTS, out, FORECAST_COLS)
@@ -733,14 +695,8 @@ def score(current_ts: pd.Timestamp, area: str,
     else:
         j = todo.assign(action=pd.NA, n_days=pd.NA, skip_reason=pd.NA)
 
-    # Three-way on purpose. The old two-way np.where sent everything that was
-    # not +1 down the always_sell branch, which was harmless only because rows
-    # without an action never got this far.
-    act = pd.array(j["action"], dtype="Float64").to_numpy(dtype="float64",
-                                                          na_value=np.nan)
-    out = j.assign(action_pnl=np.where(act == 1, j["always_buy"],
-                                       np.where(act == -1, j["always_sell"],
-                                                np.nan)),
+    # benchmarks_core.action_pnl: +1 buy, -1 sell, 0 stay out (0.0), <NA> NaN.
+    out = j.assign(action_pnl=C.action_pnl(j["action"], j["always_buy"], j["always_sell"]),
                    knownby_ts=current_ts, area=area,
                    **_version_cols(), **_param_cols(),
                      **_publisher_cols())

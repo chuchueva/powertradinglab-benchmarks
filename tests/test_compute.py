@@ -1,10 +1,8 @@
 """
 Tests for the as-of compute path. Synthetic data only — no feather, no network.
 
-The one that matters is test_signal_for_matches_shift: it proves the live path
-(as_of filter, no shift) and the backtest path (shift(2), no filter) produce the
-SAME action when publication is regular. That is the "backtest == live" claim,
-checked rather than asserted in a docstring.
+The "backtest == live" claim for the trailing bias (the matrix path against
+the report's shift(2) path) is checked in tests/test_models.py.
 
 Run:
     uv run pytest tests/test_compute.py -q
@@ -24,8 +22,7 @@ import src.benchmarks_core as C          # noqa: E402
 from src.workflow_compute import (_no_forecast, _refuse_after_gate,  # noqa: E402
                                   _refuse_incomplete, _target_grid,
                                   day_completeness, input_day_for,
-                                  leg_completeness, signal_window,
-                                  window_completeness)
+                                  leg_completeness, signal_window)
 
 N_DAYS = 3
 
@@ -66,45 +63,6 @@ def test_as_of_is_empty_before_anything_is_published():
     ts = pd.Timestamp("2026-01-01", tz="UTC")
     df = pd.DataFrame({"delivery_ts": [ts], "knownby_ts": [ts], "x": [1.0]})
     assert C.as_of(df, ts - timedelta(days=1)).empty
-
-
-def test_signal_for_matches_shift():
-    """
-    Live (as_of + lag_days=0) == backtest (shift(2)) under regular publication.
-
-    Backtest: forecast_actions labels hour X of day D using a window ending at
-    D-2. Live: standing at D-1 with everything through D-2 settled, signal_for
-    aims at day D. Same window, so the actions must be identical.
-    """
-    m = _synthetic_matrix()
-    target_day = pd.Timestamp("2026-01-15", tz="UTC")
-
-    backtest = C.forecast_actions(m, N_DAYS, lag_days=2)
-    backtest = backtest[(backtest["hour_ts"] >= target_day)
-                        & (backtest["hour_ts"] < target_day + timedelta(days=1))]
-
-    # Everything settled through D-2, i.e. nothing from D-1 onwards.
-    settled = m[m["delivery_ts"] < target_day - timedelta(days=1)]
-    target_hours = pd.date_range(target_day, periods=24, freq="h", tz="UTC")
-    live = C.signal_for(settled, N_DAYS, target_hours)
-
-    merged = backtest.merge(live, on="hour_ts", validate="one_to_one")
-    assert len(merged) == 24, "every target hour must be labelled by both paths"
-    assert (merged["stat_action_x"] == merged["stat_action_y"]).all(), \
-        "as_of path and shift(2) path disagree"
-    assert (merged["n_obs"] == N_DAYS).all()
-    # data_through is per hour-of-day: the freshest observation feeding THAT
-    # hour's window sits exactly 48 h before it — the lag, measured not assumed.
-    assert (merged["data_through"] == merged["hour_ts"] - timedelta(days=2)).all()
-
-
-def test_signal_for_leaves_short_window_unformed():
-    """A window shorter than n_days yields <NA>, never a default -1."""
-    m = _synthetic_matrix(days=2)          # only 2 days, n_days=3
-    target_hours = pd.date_range("2026-01-03", periods=24, freq="h", tz="UTC")
-    live = C.signal_for(m, N_DAYS, target_hours)
-    assert live["stat_action"].isna().all()
-    assert (live["n_obs"] == 2).all()
 
 
 def test_double_lag_is_visible():
@@ -272,31 +230,6 @@ def _nl_matrix(days, area: str = "NL") -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def test_a_missing_input_day_still_forms_a_confident_signal():
-    """
-    WHY the gate is on freshness and not on n_obs.
-
-    signal_for takes the last n_days observations per hour-of-day from the END
-    of what is available, so a hole does not shorten the window — it shifts it.
-    n_obs stays at n_days, the short-window guard cannot fire, and the forecast
-    comes out fully formed on evidence a day older than it looks. This is the
-    2026-08-30 failure, reproduced: 08-29 absent, the signal formed anyway.
-    """
-    from datetime import date
-
-    m = _nl_matrix([date(2026, 8, 26), date(2026, 8, 27), date(2026, 8, 28)])
-    current = pd.Timestamp("2026-08-30 09:30", tz="UTC")     # 08-29 is missing
-
-    sig = C.signal_for(m, N_DAYS, _target_grid(current, "NL").floor("h").unique())
-    assert sig["stat_action"].notna().all(), "the old guard sees nothing wrong"
-    assert (sig["n_obs"] == N_DAYS).all(), "and n_obs cannot betray the hole"
-
-    # The gate looks at a different thing entirely, and does see it.
-    need = input_day_for(current, "NL")
-    assert need == date(2026, 8, 29)
-    assert day_completeness(m, need, "NL") == (0, 96)
-
-
 def test_day_completeness_never_assumes_96():
     """A DST day is 92 or 100 PTU. A hard-coded 96 would refuse to forecast
     twice a year, and would accept a short day as whole the other time."""
@@ -411,41 +344,6 @@ def test_a_refusal_names_which_leg_was_missing():
     assert reason == "input_incomplete:2026-09-13:DA", reason
 
 
-def test_the_whole_signal_window_must_be_whole_not_just_its_newest_day():
-    """
-    The 2026-09-15 lesson: the gate guarded one day, the signal uses n_days.
-
-    Day-ahead for Sunday 09-13 was never published. The newest input day (09-14)
-    was complete, so the gate opened — but signal_for takes the last n_days
-    observations per hour-of-day from the END of what exists, so the window
-    silently skipped the hole and reached back to 09-11. Three calendar days of
-    evidence spanning four, and n_obs still reading 3. Exactly the failure the
-    gate was built to stop, one level up: it is not enough for the freshest day
-    to be there, the whole window has to be.
-    """
-    from datetime import date
-
-    # 09-13 missing from the middle, everything else present
-    m = _nl_matrix([date(2026, 9, 11), date(2026, 9, 12), date(2026, 9, 14)])
-    current = pd.Timestamp("2026-09-15 09:30", tz="UTC")
-    need = input_day_for(current, "NL")
-    assert need == date(2026, 9, 14)
-
-    # the old, one-day check is happy
-    assert day_completeness(m, need, "NL") == (96, 96)
-
-    # and the signal really does reach past the hole
-    sig = C.signal_for(m, N_DAYS, _target_grid(current, "NL").floor("h").unique())
-    assert (sig["n_obs"] == N_DAYS).all(), "n_obs cannot see the hole"
-
-    # the window check does see it
-    window = window_completeness(m, need, "NL", N_DAYS)
-    assert [d for d, _, _ in window] == [date(2026, 9, 14), date(2026, 9, 13),
-                                         date(2026, 9, 12)]
-    missing = [(d, h, e) for d, h, e in window if h < e]
-    assert missing == [(date(2026, 9, 13), 0, 96)], missing
-
-
 def test_one_hole_refuses_three_forecasts_and_that_is_the_price():
     """A day missing sits in n_days consecutive windows, so it costs n_days
     forecasts. Accepted deliberately: the alternative is averaging over the gap,
@@ -468,8 +366,8 @@ def test_a_refusal_lists_every_missing_day_of_the_window():
     m = _nl_matrix([date(2026, 9, 12), date(2026, 9, 14)])   # 09-13 AND 09-11 gone
     current = pd.Timestamp("2026-09-15 09:30", tz="UTC")
     need = input_day_for(current, "NL")
-    missing = [(d, h, e) for d, h, e in window_completeness(m, need, "NL", N_DAYS)
-               if h < e]
+    window = [(d, *day_completeness(m, d, "NL")) for d in signal_window(need, N_DAYS)]
+    missing = [(d, h, e) for d, h, e in window if h < e]
     assert [d for d, _, _ in missing] == [date(2026, 9, 13)]
 
     reason, detail = _refuse_incomplete(need, missing, "NL", N_DAYS, None, None)
@@ -914,42 +812,6 @@ def test_a_rate_that_is_not_out_yet_is_not_a_missing_rate():
 # --------------------------------------------------------------------------- #
 # The gate, at the granularity the signal actually works on
 # --------------------------------------------------------------------------- #
-def test_one_missing_quarter_hour_costs_one_hour_not_three_days():
-    """
-    RO, 2026-09-25: one quarter-hour absent out of 96, and under the whole-day
-    rule that refused THREE forecasts, because the day sits in three
-    consecutive windows. The hour is what the signal is computed on, so the hour
-    is what a hole should cost.
-    """
-    from datetime import date
-
-    from src.workflow_compute import incomplete_hours
-
-    days = [date(2026, 9, 23), date(2026, 9, 24), date(2026, 9, 25)]
-    m = _nl_matrix(days)
-    hole = pd.Timestamp("2026-09-25 10:00", tz="UTC")
-    m = m.loc[m["delivery_ts"] != hole]
-
-    bad = incomplete_hours(m, date(2026, 9, 25), "NL", 3)
-    assert list(bad) == [10], bad
-    assert bad[10] == [(date(2026, 9, 25), 3, 4)], bad[10]
-
-
-def test_an_absent_day_still_fails_every_hour():
-    """The old behaviour is the special case, not a second rule. A missing DAY
-    is the dangerous one — it SHIFTS the window instead of shortening it — and
-    it fails all twenty-four hours, so nothing forms and the day is refused
-    exactly as before."""
-    from datetime import date
-
-    from src.workflow_compute import incomplete_hours
-
-    m = _nl_matrix([date(2026, 9, 23), date(2026, 9, 25)])     # 09-24 absent
-    bad = incomplete_hours(m, date(2026, 9, 25), "NL", 3)
-    assert len(bad) == 24, sorted(bad)
-    assert all(shorts[0][1] == 0 for shorts in bad.values())
-
-
 def test_the_expected_count_per_hour_comes_from_the_grid_not_from_four():
     """A daylight-saving day has one UTC hour-of-day occurring twice or not at
     all. Hard-coding four would refuse a perfectly good hour twice a year."""
