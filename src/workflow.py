@@ -32,6 +32,7 @@ Design:
 
 Run:
     uv run python src/workflow.py seed
+    uv run python src/workflow.py backfill [ZONE ...]   # history BEFORE what was polled
     uv run python src/workflow.py migrate     # feather store -> parquet, once
 """
 
@@ -316,6 +317,75 @@ def seed_store(area: str, log: logging.Logger | None = None) -> None:
              len(im_out), im_out["delivery_ts"].min(), im_out["delivery_ts"].max())
 
 
+def history_slice(area: str, da_hist: pd.DataFrame,
+                  im_hist: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    One zone's rows from the history feathers, imbalance under the same code
+    mapping as the live path: Germany's imbalance is filed as "DE" in the
+    archive from 2022-06-22 (benchmarks_core.IM_ALIAS) and belongs to DE_LU.
+    """
+    try:                                # script or module, see the imports above
+        from src.benchmarks_core import IM_ALIAS
+    except ImportError:                 # pragma: no cover - depends on entry point
+        from benchmarks_core import IM_ALIAS
+    im_names = [area] + [k for k, v in IM_ALIAS.items() if v == area]
+    da = da_hist.loc[da_hist["area"] == area, DA_COLS].copy()
+    im = im_hist.loc[im_hist["area"].isin(im_names), IM_COLS].copy()
+    return da, im
+
+
+def backfill(store: pd.DataFrame, hist: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """
+    The store plus the history rows that come strictly BEFORE its first
+    delivery_ts. Rows already in the store are never touched: they carry real
+    knownby_ts from polling, which the archive's revision stamps cannot replace.
+    An empty store takes the whole history (that is `seed`).
+    """
+    if store.empty:
+        return hist.copy(), len(hist)
+    older = hist.loc[hist["delivery_ts"] < store["delivery_ts"].min()]
+    return pd.concat([older, store], ignore_index=True), len(older)
+
+
+def backfill_store(area: str, log: logging.Logger | None = None,
+                   da_hist: pd.DataFrame | None = None,
+                   im_hist: pd.DataFrame | None = None) -> None:
+    """
+    Add the archive history BEFORE what the store already holds (2026-10-28).
+
+    `seed` rewrites the store from the feathers and is right only for a zone
+    that has never been polled. Ten zones were polled from 2026-08-31 before
+    their history was poured in; for them this is the command. Idempotent: a
+    second run finds nothing older than the store's first row and adds nothing.
+    Scoring is unaffected: `score_from` keeps the history out of the passes.
+    """
+    log = log or setup_logging()
+    if da_hist is None:
+        da_hist = pd.read_feather(f"{PROCESSED}/history_da.feather")
+    if im_hist is None:
+        im_hist = pd.read_feather(f"{PROCESSED}/history_im.feather")
+    h_da, h_im = history_slice(area, da_hist, im_hist)
+    da, im = load_store(area)
+    n_da0, n_im0 = len(da), len(im)
+
+    da_new, add_da = backfill(da, h_da)
+    im_new, add_im = backfill(im, h_im)
+    if add_da == 0 and add_im == 0:
+        log.info("%s: backfill — nothing older than the store, nothing added", area)
+        return
+    for name, df in (("DA", da_new), ("IM", im_new)):
+        log.info("%s %s currencies after backfill: %s", area, name,
+                 ", ".join(sorted(df["currency"].dropna().unique())) or "none")
+
+    write_store(da_new, im_new, area)
+    da_out, im_out = load_store(area)
+    assert len(da_out) == n_da0 + add_da, f"{area} DA: {len(da_out)} != {n_da0} + {add_da}"
+    assert len(im_out) == n_im0 + add_im, f"{area} IM: {len(im_out)} != {n_im0} + {add_im}"
+    log.info("%s: backfill added DA %d rows (now %s..%s) and IM %d rows (now %s..%s)",
+             area, add_da, da_out["delivery_ts"].min().date(), da_out["delivery_ts"].max().date(),
+             add_im, im_out["delivery_ts"].min().date(), im_out["delivery_ts"].max().date())
+
+
 # --------------------------------------------------------------------------- #
 # Running every zone, and surviving one of them
 # --------------------------------------------------------------------------- #
@@ -351,13 +421,20 @@ def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "seed"
     # A zone may be named explicitly — seeding a NEW zone happens once, by hand,
     # and usually for one zone while the others are already running.
-    areas = sys.argv[2:] or None
+    # "NL RO" and "NL, RO" both work: a stray comma is not part of a zone code.
+    areas = [a for a in (x.strip(", ") for x in sys.argv[2:]) if a] or None
     if cmd == "seed":
         failed = for_each_area(lambda a: seed_store(a, log), log, "seed", areas)
+    elif cmd == "backfill":
+        # The feathers are read once for all zones: ~450 MB, not per zone.
+        da_hist = pd.read_feather(f"{PROCESSED}/history_da.feather")
+        im_hist = pd.read_feather(f"{PROCESSED}/history_im.feather")
+        failed = for_each_area(lambda a: backfill_store(a, log, da_hist, im_hist),
+                               log, "backfill", areas)
     elif cmd == "migrate":
         failed = for_each_area(lambda a: migrate_store(a, log), log, "migrate", areas)
     else:
-        log.error("unknown command %r (expected: seed | migrate)", cmd)
+        log.error("unknown command %r (expected: seed | backfill | migrate)", cmd)
         raise SystemExit(1)
     raise SystemExit(1 if failed else 0)
 
