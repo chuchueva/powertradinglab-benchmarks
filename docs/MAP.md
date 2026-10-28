@@ -22,14 +22,18 @@ Three documents, three kinds of knowledge:
      parse_da / parse_im                  history_{da,im,load}.feather
              │                                        │
              └────────► ZONE STORE ◄──────────────────┘
-          zones/<AREA>/da.parquet, im.parquet   (archive fill: by hand, optional)
+          zones/<AREA>/da.parquet, im.parquet   (archive fill: seed / backfill, by hand)
                             │
                         as_of(current_ts)          ← the only causality rule
                             │
                        benchmarks_core
-              build_matrix → add_pnl → signal_for
+                  build_matrix → add_pnl
                             │
-              forecasts.parquet ──► scores.parquet
+              models/features   (the matrix: one row per delivery hour,
+                            │    window d1..dn tied to timestamps)
+              models/<model>.decide          ← the one place an action is made
+                            │
+              forecasts.parquet ──► scores.parquet   (action_pnl)
 ```
 
 Three systemd timers on the server (`scripts/make_systemd.py`), all through
@@ -45,7 +49,7 @@ and it must finish before the 12:00 market-local auction gate), `catchup` at
 
 | file | owns | the rule it enforces |
 |---|---|---|
-| `benchmarks_core.py` | the benchmark maths and `as_of` | causality: you only see what was published |
+| `benchmarks_core.py` | the benchmark maths, `as_of`, `action_pnl` | causality: you only see what was published; what an action earned is computed in one place |
 | `period.py` | market day ↔ UTC instants | a market day is local midnight to local midnight (23/24/25 h) |
 
 **Reading the outside world (raw in, DataFrame out)**
@@ -55,16 +59,16 @@ and it must finish before the 12:00 market-local auction gate), `catchup` at
 | `ingest.py` | the HTTP request, saving raw bytes + sidecar | keep exactly what the source said; never log the key |
 | `parse_da.py` / `parse_im.py` | live A44 / A85 documents | read the currency, never assume it; a price published per hour fills each of its four quarter-hours |
 | `parse_filelibrary.py` | the monthly extracts (all zones) | Positive = A04/long, Negative = A05/short |
-| `parse_fx.py`, `parse_fx_nbu.py` | ECB and NBU rates → one daily table | no rate is invented outside a currency's own span |
+| `parse_fx.py`, `parse_fx_nbu.py` | ECB and NBU rates → one daily table with `knownby_ts`; `fx_as_of` | no rate is invented outside a currency's own span; live carries the last known rate onto today only |
 
 **The workflow (orchestration, no maths)**
 
 | file | owns | the rule it enforces |
 |---|---|---|
-| `workflow.py` | the per-zone store, logging, seed, migrate, `for_each_area` | versions are kept on write, collapsed on read |
+| `workflow.py` | the per-zone store, logging, seed, backfill, migrate, `for_each_area` | versions are kept on write, collapsed on read; `backfill` adds archive history only BEFORE what was polled |
 | `rebuild.py` | the store, rebuilt from `data/raw` alone | the store is a fold over raw: same parsing, same diff as `update` |
 | `update.py` | polling, diffing, the poll log | only CHANGES are stored |
-| `workflow_compute.py` | forecast / score | a day is scored exactly twice, and never forecast on a day that is not whole |
+| `workflow_compute.py` | forecast / score | a day is scored exactly twice; an hour is decided only on a whole window |
 | `publish.py` | rendering the tables as published XML | a published file is frozen; it computes nothing — including the version, which is read from the row |
 | `status.py` | `outputs/status.xml` | the ONE mutable file, and facts only — no self-assessment |
 | `summary.py` | `outputs/v1/` — scores and forecasts, one row per zone per day; monthly sums of the same rows | derived values only; nothing before `publication.public_from`; no wall clock |
@@ -85,15 +89,25 @@ zone, expected currency, `shadow` or `live` — lives in `settings.json -> zones
 and `areas` says which zones run. The store can always be rebuilt from
 `data/raw` alone (`src/rebuild.py`); it then starts where raw starts.
 
+**The models (`models/`, like `algorithms/` in a trading framework)**
+
+| file | owns |
+|---|---|
+| `features.py` | the matrix — one row per (area, delivery hour, knownby_ts): lags d1..d14, calendar; `outcome()` from the benchmarks; `fit_scaler` / `scale`. The only place inputs are prepared, live and backtest alike |
+| `trailing_bias.py`, `logreg.py`, `nn.py` | `decide()` — one per model; the live forecast and the checks call the same one |
+| `actions.py` | `to_action(p, sensitivity)`: probability → +1 / 0 / −1 |
+| `model_utils.py` | `_model_storage/<version>/`: meta.json, scaler.json, model.joblib or model.pt |
+| `train/` | flat scripts for an interactive console: `matrix_hourly`, `train_*`, `check_*`, `check_published_trailing_bias` |
+
 **Around it**
 
 | file | owns |
 |---|---|
 | `report/benchmarks.py` | the yearly report over all zones → `yearly.csv` |
-| `validate_as_of.py` (notes repository) | proof that live == backtest (NL 2025, exact) |
+| `tests/test_models.py` | proof that the matrix backtest == the report's shift(2) path, hour by hour (`validate_as_of.py` in the notes repository did this for NL 2025 and is now an archive) |
 | `scripts/make_systemd.py` | the server schedule (three timers, UTC) |
 | `scripts/make_launchd.py` | the same schedule for a Mac; kept as the way back |
-| `tests/` | 108 cases, each docstring says WHY — faster to read than the code |
+| `tests/` | 121 cases, each docstring says WHY — faster to read than the code |
 
 ## The five tables that matter
 
@@ -162,6 +176,6 @@ point of putting it there.
 | what did the source say? | `data/raw/YYYY/MM/` + the sidecar |
 | did anything change today? | `polls.parquet`, columns `n_new` / `n_changed` |
 | what did we decide, and on what? | `forecasts.parquet`, column `data_through` |
-| do the report numbers still hold? | `validate_as_of.py`, kept in the notes repository |
+| does the rule still give what was published? | `models/train/check_published_trailing_bias.py` |
 | is the whole thing still sane? | `uv run pytest tests/ -q` |
-| the store is lost or suspect | `uv run python -m src.rebuild --force` — starts where `data/raw` starts |
+| the store is lost or suspect | `uv run python -m src.rebuild --force` — starts where `data/raw` starts; then `python src/workflow.py backfill` for 2020 onwards from the history feathers |
