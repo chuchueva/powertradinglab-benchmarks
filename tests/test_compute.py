@@ -404,22 +404,38 @@ def test_a_decision_is_not_issued_after_the_auction_has_closed():
     assert "Nothing to recover" in detail
 
 
-def test_the_gate_leaves_the_retries_room_but_not_much():
-    """The decision run plus its retries must finish before the gate. At 09:40
-    with four attempts five minutes apart the last one starts at 09:55, and in
-    summer the gate is 10:00 — which is exactly why the gate is CHECKED rather
-    than assumed to be respected by arithmetic."""
+def test_the_decision_run_sits_twenty_minutes_before_the_gate_all_year():
+    """2026-10-31: the run is tied to the auction, 12:00 Europe/Brussels minus
+    run_minutes_before_gate — 09:40 UTC in summer, 10:40 UTC in winter. The
+    server's timer is set on the gate's own clock, so it moves by itself."""
     from datetime import date
 
     import src.config as cfg
     from src.period import auction_gate
 
-    gate = auction_gate(date(2026, 9, 18))
-    h, m = (int(x) for x in cfg.RUN_TIME_UTC.split(":"))
-    last_attempt = h * 60 + m + (cfg.retry_attempts() - 1) * cfg.retry_delay_s() // 60
-    assert last_attempt < gate.hour * 60 + gate.minute, (last_attempt, gate)
+    assert cfg.run_time_local() == ("11:40", "Europe/Brussels")
+    for day, expect in ((date(2026, 7, 15), "09:40"), (date(2026, 1, 15), "10:40"),
+                        (date(2026, 10, 24), "09:40"), (date(2026, 10, 25), "10:40"),
+                        (date(2026, 3, 28), "10:40"), (date(2026, 3, 29), "09:40")):
+        assert cfg.run_time_utc(day) == expect, (day, cfg.run_time_utc(day))
+        gate = auction_gate(day + timedelta(days=1))
+        h, m = (int(x) for x in expect.split(":"))
+        assert gate.hour * 60 + gate.minute - (h * 60 + m) == cfg.run_minutes_before_gate()
 
 
+def test_no_retry_starts_closer_than_five_minutes_to_the_gate():
+    """With the run 20 minutes before the gate, four attempts five minutes
+    apart would end AT the gate. A retry that would start later than
+    retry_stop_minutes_before_gate before it is not made; after the gate
+    (catch-up, monthly) retries are always allowed."""
+    from src.update import _retry_allowed
+
+    utc = timezone.utc
+    # winter: gate 11:00 UTC on 2026-11-03 for delivery 11-04
+    assert _retry_allowed(datetime(2026, 11, 3, 10, 40, tzinfo=utc), 300)       # 10:45
+    assert _retry_allowed(datetime(2026, 11, 3, 10, 50, tzinfo=utc), 300)       # 10:55
+    assert not _retry_allowed(datetime(2026, 11, 3, 10, 51, tzinfo=utc), 300)   # 10:56
+    assert _retry_allowed(datetime(2026, 11, 3, 14, 0, tzinfo=utc), 300)        # after
 def test_a_refused_day_can_never_be_forecast_later():
     """
     The reason a refusal is permanent rather than deferred.
@@ -489,10 +505,11 @@ def test_every_scheduled_time_counts_as_a_slot():
     """
     import src.config as cfg
     from src.workflow import scheduled_slot
+    from datetime import date
 
     times = cfg.scheduled_times_utc()
     assert cfg.refetch_time_utc() in times, times
-    assert cfg.RUN_TIME_UTC in times, times
+    assert cfg.run_time_utc(date(2026, 8, 20)) in cfg.scheduled_times_utc(date(2026, 8, 20)), times
 
     h, m = (int(x) for x in cfg.refetch_time_utc().split(":"))
     slot, late = scheduled_slot(datetime(2026, 8, 20, h, m, 5, tzinfo=timezone.utc))

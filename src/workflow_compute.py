@@ -127,9 +127,11 @@ def _version_cols() -> dict:
     return {"schema_version": v["schema"], "methodology_version": v["methodology"]}
 
 
-def _param_cols() -> dict:
-    """The tunables in force at computation time, frozen into the row."""
-    p = cfg.publication_parameters()
+def _param_cols(current_ts: pd.Timestamp | None = None) -> dict:
+    """The tunables in force at computation time, frozen into the row.
+    run_time_utc is the decision time of THAT day (09:40 or 10:40)."""
+    day = current_ts.tz_convert("UTC").date() if current_ts is not None else None
+    p = cfg.publication_parameters(day)
     return {c: p[c] for c in PARAM_COLS}
 
 
@@ -382,7 +384,7 @@ def _no_forecast(current_ts: pd.Timestamp, area: str, ptus: pd.DatetimeIndex,
                      n_obs=pd.array([pd.NA] * n, dtype="Int64"),
                      data_through=m["delivery_ts"].max().floor("h"),
                      n_days=n_days, skip_reason=reason,
-                     **_version_cols(), **_param_cols(), **_publisher_cols()))
+                     **_version_cols(), **_param_cols(current_ts), **_publisher_cols()))
     if persist:
         _append(FORECASTS, out, FORECAST_COLS)
     log.warning("forecast %s @ %s: NO FORECAST — %s", area, current_ts, detail)
@@ -562,7 +564,7 @@ def forecast(current_ts: pd.Timestamp, area: str,
              .assign(hour_ts=lambda d: d["delivery_ts"].dt.floor("h"))
              .merge(sig, how="left", on="hour_ts")
              .assign(knownby_ts=current_ts, area=area, n_days=n_days,
-                     skip_reason=pd.NA, **_version_cols(), **_param_cols(),
+                     skip_reason=pd.NA, **_version_cols(), **_param_cols(current_ts),
                      **_publisher_cols()))
 
     # The PARTIAL case — some hours decided, some not.
@@ -698,7 +700,7 @@ def score(current_ts: pd.Timestamp, area: str,
     # benchmarks_core.action_pnl: +1 buy, -1 sell, 0 stay out (0.0), <NA> NaN.
     out = j.assign(action_pnl=C.action_pnl(j["action"], j["always_buy"], j["always_sell"]),
                    knownby_ts=current_ts, area=area,
-                   **_version_cols(), **_param_cols(),
+                   **_version_cols(), **_param_cols(current_ts),
                      **_publisher_cols())
 
     if persist:

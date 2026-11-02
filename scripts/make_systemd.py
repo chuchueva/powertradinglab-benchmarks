@@ -85,10 +85,13 @@ WantedBy=timers.target
 
 
 def _calendars() -> dict[str, str]:
-    """mode -> OnCalendar, straight from settings. No conversion anywhere."""
+    """mode -> OnCalendar, straight from settings. The daily run on the gate's
+    clock, the two runs that make no decision in UTC."""
     day = cfg.final_day_of_month()
     return {
-        "daily": f"*-*-* {cfg.RUN_TIME_UTC}:00 UTC",
+        # On the AUCTION's clock (2026-10-31): 11:40 Europe/Brussels is 09:40
+        # UTC in summer and 10:40 in winter, and systemd moves it by itself.
+        "daily": "*-*-* {}:00 {}".format(*cfg.run_time_local()),
         "catchup": f"*-*-* {cfg.catchup_time_utc()}:00 UTC",
         "monthly": f"*-*-{day:02d} {cfg.refetch_time_utc()}:00 UTC",
     }
@@ -132,16 +135,18 @@ def main() -> None:
 
     cal = _calendars()
     print(f"repo: {REPO}\nuser: {a.user}\n")
-    print(f"{'unit':<32} {'when (UTC)':<26} what")
+    print(f"{'unit':<32} {'when':<32} what")
     what = {"daily": "update + forecast + score + publish",
             "catchup": "update + score + publish, NO forecast",
             "monthly": "re-request last month, for the as-final pass"}
     for mode, when in cal.items():
-        print(f"{f'{PREFIX}-{mode}.timer':<32} {when:<26} {what[mode]}")
+        print(f"{f'{PREFIX}-{mode}.timer':<32} {when:<32} {what[mode]}")
 
-    if cfg.refetch_time_utc() >= cfg.RUN_TIME_UTC:
+    from datetime import date
+    earliest = min(cfg.run_time_utc(date(2026, 1, 15)), cfg.run_time_utc(date(2026, 7, 15)))
+    if cfg.refetch_time_utc() >= earliest:
         print(f"\n  WARNING: the monthly re-fetch ({cfg.refetch_time_utc()}) is not "
-              f"earlier than the daily run ({cfg.RUN_TIME_UTC}).\n  The as-final "
+              f"earlier than the daily run ({earliest} UTC in summer).\n  The as-final "
               f"scoring would then read data that has not been refreshed yet.")
 
     if not a.install:

@@ -118,7 +118,7 @@ def scheduled_slot(now: datetime, times_utc: list[str] | None = None
     woke up? Without it, a punctual run and a run that fired hours late look
     identical in the log, and the only way to tell is reading file mtimes.
     """
-    times = times_utc if times_utc is not None else cfg.scheduled_times_utc()
+    times = times_utc if times_utc is not None else cfg.scheduled_times_utc(now.date())
     today = now.date()
     slots = sorted(datetime.combine(today, datetime.strptime(t, "%H:%M").time(),
                                     tzinfo=timezone.utc) for t in times)

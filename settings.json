@@ -6,7 +6,7 @@
     "publisher_url": "https://powertradinglab.org",
     "public_from": "2026-09-17"
   },
-  "run_time_utc": "09:40",
+  "run_minutes_before_gate": 20,
   "catchup_time_utc": "14:00",
   "areas": [
     "NL",
@@ -187,12 +187,10 @@
   "update": {
     "window_days": 3,
     "max_query_days": 0,
-    "poll_times_utc": [
-      "09:40"
-    ],
     "refetch_time_utc": "08:00",
     "retry_attempts": 4,
-    "retry_delay_s": 300
+    "retry_delay_s": 300,
+    "retry_stop_minutes_before_gate": 5
   },
   "paths": {
     "processed": "data/processed",

@@ -60,7 +60,7 @@ from src.entsoe_ack import NoDataAvailable
 from src.ingest import ROOT, _mask, fetch_raw
 from src.parse_da import parse_da_xml
 from src.parse_im import parse_im_bytes
-from src.period import market_range_period, market_tz
+from src.period import auction_gate, market_range_period, market_tz
 from src.workflow import (DA_COLS, DA_VALUES, IM_COLS, IM_VALUES, for_each_area,
                           load_store, setup_logging, store_dir, write_store)
 
@@ -333,6 +333,23 @@ def update(day_from: date, day_to: date, area: str, log=None) -> pd.DataFrame:
     return pd.DataFrame(polls)[POLL_COLS]
 
 
+def _retry_allowed(now: datetime, delay_s: int) -> bool:
+    """
+    May a retry that starts `delay_s` from now still be made (2026-10-31)?
+
+    Before today's gate: only if it starts at least retry_stop_minutes_before_gate
+    before it — the forecast still has to run, and a poll that ends after the
+    gate feeds a decision nobody can place. After the gate (the 14:00 catch-up,
+    the monthly re-fetch) there is no decision to protect, and retries are
+    always allowed.
+    """
+    gate = auction_gate(now.date() + timedelta(days=1))
+    if now >= gate:
+        return True
+    stop = gate - timedelta(minutes=cfg.retry_stop_minutes_before_gate())
+    return now + timedelta(seconds=delay_s) <= stop
+
+
 def _poll_with_retry(day_from: date, day_to: date, area: str, log) -> bool:
     """
     One chunk, retried. Returns whether it ended complete.
@@ -350,6 +367,12 @@ def _poll_with_retry(day_from: date, day_to: date, area: str, log) -> bool:
         if polls["http_ok"].all():
             return True
         if n < attempts:
+            if not _retry_allowed(datetime.now(timezone.utc), delay):
+                log.error("%s: poll incomplete (attempt %d of %d) and a retry in %d s "
+                          "would start less than %d min before the gate — no more "
+                          "retries; the forecast runs on what is in the store",
+                          area, n, attempts, delay, cfg.retry_stop_minutes_before_gate())
+                return False
             log.warning("%s: poll incomplete (attempt %d of %d), retrying in %d s",
                         area, n, attempts, delay)
             time.sleep(delay)

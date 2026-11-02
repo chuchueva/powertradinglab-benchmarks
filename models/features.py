@@ -162,11 +162,14 @@ def calendar(x: pd.DataFrame, area: str) -> pd.DataFrame:
 
 
 def decision_instants(start, end) -> list[pd.Timestamp]:
-    """One decision per day in [start, end], at run_time_utc."""
-    hh, mm = (int(v) for v in cfg.RUN_TIME_UTC.split(":"))
+    """One decision per day in [start, end], at that day's run time
+    (run_minutes_before_gate before the gate: 09:40 / 10:40 UTC)."""
     days = pd.date_range(pd.Timestamp(start).date(), pd.Timestamp(end).date(), freq="D")
-    return [pd.Timestamp(d.date(), tz="UTC") + pd.Timedelta(hours=hh, minutes=mm)
-            for d in days]
+    out = []
+    for d in days:
+        hh, mm = (int(v) for v in cfg.run_time_utc(d.date()).split(":"))
+        out.append(pd.Timestamp(d.date(), tz="UTC") + pd.Timedelta(hours=hh, minutes=mm))
+    return out
 
 
 def _latest_matrix(area: str) -> pd.DataFrame:
