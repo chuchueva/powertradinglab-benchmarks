@@ -34,7 +34,7 @@ the test docstrings say why the rule exists.
    defaulted when the signal window has a hole (`<NA>` instead), no exchange
    rate carried past a date whose own rate was due. One stated exception: in
    the live decision, today's already-delivered hours are valued at the last
-   rate known at that moment — the rate a trader actually has at 09:40 UTC,
+   rate known at that moment — the rate a trader actually has at the decision,
    before the ECB publishes today's. A gap is information.
 
 Two rules for what leaves the machine:
@@ -66,8 +66,11 @@ Per PTU, `extractable + adverse = passive_buy + passive_sell` exactly;
 
 ## The decision and the gate
 
-The trailing-bias decision for delivery day D is made at 09:40 UTC on D−1, before
-the 12:00 (Europe/Brussels) day-ahead gate.
+The trailing-bias decision for delivery day D is made on D−1, 20 minutes before
+the 12:00 (Europe/Brussels) day-ahead gate: 11:40 Brussels time, which is 09:40
+UTC in summer and 10:40 UTC in winter. The decision is tied to the auction, not
+to a UTC clock. No retry of a failed request starts later than 5 minutes before
+the gate.
 
 **The window is tied to timestamps**, per delivery hour h, with `n_days`
 observations (default 3):

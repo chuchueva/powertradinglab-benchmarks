@@ -38,7 +38,8 @@ Three documents, three kinds of knowledge:
 
 Three systemd timers on the server (`scripts/make_systemd.py`), all through
 `scripts/run.sh`:
-`daily` at 09:40 UTC (update -> forecast -> score -> publish — the one decision,
+`daily` at 11:40 Europe/Brussels — 09:40 UTC in summer, 10:40 in winter, 20
+minutes before the gate (update -> forecast -> score -> publish — the one decision,
 and it must finish before the 12:00 market-local auction gate), `catchup` at
 14:00 UTC (update -> score -> publish, NEVER forecast: the gate has closed), and
 `monthly` on the 20th (re-request the previous month for the as-final pass).
