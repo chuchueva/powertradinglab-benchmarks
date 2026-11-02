@@ -21,7 +21,6 @@ SETTINGS_PATH = _ROOT / "settings.json"
 with open(SETTINGS_PATH, encoding="utf-8") as _f:
     SETTINGS: dict = json.load(_f)
 
-RUN_TIME_UTC: str = SETTINGS["run_time_utc"]      # "HH:MM", pre-auction (09:30)
 AREAS: list[str] = SETTINGS["areas"]
 PATHS: dict = SETTINGS["paths"]
 
@@ -258,13 +257,13 @@ def public_from() -> date | None:
     return date.fromisoformat(v) if v else None
 
 
-def publication_parameters() -> dict:
+def publication_parameters(day: date | None = None) -> dict:
     """Everything in settings that can move a published number, in one dict —
     for the header of every published file. Extend this when a new setting
     starts influencing results."""
     return {"n_days_trailing_bias_default": _N_DAYS_DEFAULT,
             "final_day_of_month": final_day_of_month(),
-            "run_time_utc": RUN_TIME_UTC,
+            "run_time_utc": run_time_utc(day),
             "causality": "as_of"}
 
 
@@ -283,6 +282,40 @@ def day_ahead_gate() -> tuple[int, int, str]:
     hhmm = str(g.get("gate_local", "12:00"))
     h, m = (int(x) for x in hhmm.split(":"))
     return h, m, str(g.get("gate_tz", "Europe/Brussels"))
+
+
+def run_minutes_before_gate() -> int:
+    """How long before the day-ahead gate the decision run starts (2026-10-31).
+
+    The run is tied to the AUCTION, not to a UTC clock: 12:00 Europe/Brussels
+    minus 20 minutes is 09:40 UTC in summer and 10:40 UTC in winter. Under the
+    old fixed 09:40 UTC the winter decision gave away an hour of data that is
+    published before the gate — intraday imbalance hours, and AL's imbalance,
+    which arrives between 09:40 and 10:12 UTC (observed 2026-10-30)."""
+    return int(SETTINGS.get("run_minutes_before_gate", 20))
+
+
+def run_time_local() -> tuple[str, str]:
+    """("HH:MM", tz) of the decision run on the auction's own clock — what the
+    server's timer is set to, so that daylight saving moves it by itself."""
+    h, m, tzname = day_ahead_gate()
+    t = datetime(2000, 1, 1, h, m) - timedelta(minutes=run_minutes_before_gate())
+    return f"{t:%H:%M}", tzname
+
+
+def run_time_utc(day: date | None = None) -> str:
+    """
+    "HH:MM" UTC of the decision run on `day` (a UTC date; default today).
+
+    Computed, never written down: it is the gate minus run_minutes_before_gate,
+    read on the gate's clock, so it is 09:40 in summer and 10:40 in winter.
+    """
+    from zoneinfo import ZoneInfo
+    day = day or datetime.now(timezone.utc).date()
+    hhmm, tzname = run_time_local()
+    h, m = (int(x) for x in hhmm.split(":"))
+    local = datetime(day.year, day.month, day.day, h, m, tzinfo=ZoneInfo(tzname))
+    return f"{local.astimezone(timezone.utc):%H:%M}"
 
 
 def final_day_of_month() -> int:
@@ -390,8 +423,8 @@ def refetch_time_utc() -> str:
     """When the monthly re-request runs, on `final_day_of_month`. Deliberately
     NOT a separate day setting: the re-fetch exists to feed the as-final scoring
     pass, so its date is that rule's date and cannot drift away from it. Keep it
-    earlier than `run_time_utc` — the ordering is guaranteed by nothing but the
-    clock."""
+    earlier than the decision run (run_time_utc: 09:40 / 10:40 UTC) — the
+    ordering is guaranteed by nothing but the clock."""
     return str(_UPDATE.get("refetch_time_utc", "08:00"))
 
 
@@ -405,13 +438,14 @@ def poll_times_utc() -> list[str]:
     extra polls also provided by accident was redundancy against a bad moment at
     the source, and that is now provided on purpose by `retry_attempts`.
     """
-    return list(_UPDATE.get("poll_times_utc", [RUN_TIME_UTC]))
+    return list(_UPDATE.get("poll_times_utc", [run_time_utc()]))
 
 
 def retry_attempts() -> int:
     """How many times a poll may try before the run goes on without fresh data.
-    Four attempts five minutes apart covers a 15-minute wobble and still lands
-    ahead of the 10:00 UTC summer gate."""
+    Four attempts five minutes apart covers a 15-minute wobble; a retry that
+    would start later than retry_stop_minutes_before_gate before the gate is
+    not made (update._retry_allowed)."""
     return int(_UPDATE.get("retry_attempts", 4))
 
 
@@ -419,7 +453,14 @@ def retry_delay_s() -> int:
     return int(_UPDATE.get("retry_delay_s", 300))
 
 
-def scheduled_times_utc() -> list[str]:
+def retry_stop_minutes_before_gate() -> int:
+    """No retry may start later than this before the gate (2026-10-31). With
+    the run 20 minutes before the gate, four attempts five minutes apart would
+    end at the gate itself; the forecast still has to run after the poll."""
+    return int(_UPDATE.get("retry_stop_minutes_before_gate", 5))
+
+
+def scheduled_times_utc(day: date | None = None) -> list[str]:
     """
     EVERY time something is scheduled — polls, the decision, the monthly
     re-fetch. Used for labelling a run with the slot it belongs to.
@@ -428,7 +469,7 @@ def scheduled_times_utc() -> list[str]:
     poll a day, a monthly re-fetch at 08:00 would otherwise be matched against
     yesterday's 09:30 and reported as twenty-two hours late.
     """
-    return sorted({*poll_times_utc(), RUN_TIME_UTC, refetch_time_utc(),
+    return sorted({*poll_times_utc(), run_time_utc(day), refetch_time_utc(),
                    catchup_time_utc()})
 
 

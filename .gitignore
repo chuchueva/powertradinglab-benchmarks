@@ -21,3 +21,4 @@ __pycache__/
 /_history_files.txt
 .DS_Store
 /report/*.pdf
+/report/NOTES.md

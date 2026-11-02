@@ -137,7 +137,10 @@ def main() -> None:
                    help="write to ~/Library/LaunchAgents and load the jobs")
     a = p.parse_args()
 
-    run_utc = cfg.RUN_TIME_UTC
+    # launchd has no timezone in its calendar: the decision time is TODAY's.
+    # Re-run this script after a daylight-saving change (the Mac is the way
+    # back only; the server's timer moves by itself).
+    run_utc = cfg.run_time_utc()
     catchup_utc = cfg.catchup_time_utc()
     poll_utc = [t for t in cfg.poll_times_utc() if t != run_utc]
     refetch_utc = cfg.refetch_time_utc()
