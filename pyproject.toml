@@ -18,3 +18,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.0",
 ]
+
+[tool.pytest.ini_options]
+# Only the project's own tests. private/ holds example code from other
+# projects, with test_*.py files of its own that need packages we do not have.
+testpaths = ["tests"]
