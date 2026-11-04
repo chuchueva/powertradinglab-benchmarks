@@ -61,7 +61,7 @@ from src.ingest import ROOT, _mask, fetch_raw
 from src.parse_da import parse_da_xml
 from src.parse_im import parse_im_bytes
 from src.period import auction_gate, market_range_period, market_tz
-from src.workflow import (DA_COLS, DA_VALUES, IM_COLS, IM_VALUES, for_each_area,
+from src.workflow import (DA_COLS, DA_VALUES, IM_COLS, IM_VALUES,
                           load_store, setup_logging, store_dir, write_store)
 
 
@@ -350,36 +350,67 @@ def _retry_allowed(now: datetime, delay_s: int) -> bool:
     return now + timedelta(seconds=delay_s) <= stop
 
 
-def _poll_with_retry(day_from: date, day_to: date, area: str, log) -> bool:
+def poll_all(jobs: list[tuple[str, date, date]], log, poll=None,
+             sleep=time.sleep, now=None) -> tuple[list, set]:
     """
-    One chunk, retried. Returns whether it ended complete.
+    Poll every (area, day_from, day_to) once, then retry ONLY what failed.
 
-    Retry, because there is now only ONE poll a day and it sits on the decision
-    itself. A single bad moment at the source used to be covered by the four
-    other polls; observed on 2026-08-07, when both documents failed at exactly
-    the 09:30 slot and the forecast ran on the previous day's data. A failed
-    fetch does not raise — update() records it and returns — so the retry checks
-    the poll log rather than catching anything.
+    Retry, because there is only ONE poll a day and it sits on the decision
+    itself (2026-08-07: both documents failed at the 09:30 slot and the
+    forecast ran on the previous day's data). A failed fetch does not raise —
+    update() records it and returns — so success is read from the poll log.
+
+    Two passes, not a retry loop inside each zone (2026-11-04). On 2026-11-03
+    NL's day-ahead request failed twice at the source; its two five-minute
+    waits ran BEFORE the other eleven zones were even asked, and the forecast
+    came out at 10:56:11, four minutes before the gate. Now every zone is
+    asked first, the wait is shared, and only the failed jobs are repeated —
+    a failure in one zone costs the others nothing. Retries stop at
+    `_retry_allowed` (the gate minus retry_stop_minutes_before_gate).
+
+    An exception is not a failed fetch: it is logged with its traceback, the
+    zone is counted in `errors`, and it is not retried.
+
+    Returns (jobs still incomplete, zones that raised).
     """
+    def _default_poll(area, day_from, day_to):
+        return bool(update(day_from, day_to, area, log)["http_ok"].all())
+
+    poll = poll or _default_poll
+    now = now or (lambda: datetime.now(timezone.utc))
     attempts, delay = cfg.retry_attempts(), cfg.retry_delay_s()
+    errors: set[str] = set()
+    pending = list(jobs)
     for n in range(1, attempts + 1):
-        polls = update(day_from, day_to, area, log)
-        if polls["http_ok"].all():
-            return True
-        if n < attempts:
-            if not _retry_allowed(datetime.now(timezone.utc), delay):
-                log.error("%s: poll incomplete (attempt %d of %d) and a retry in %d s "
-                          "would start less than %d min before the gate — no more "
-                          "retries; the forecast runs on what is in the store",
-                          area, n, attempts, delay, cfg.retry_stop_minutes_before_gate())
-                return False
-            log.warning("%s: poll incomplete (attempt %d of %d), retrying in %d s",
-                        area, n, attempts, delay)
-            time.sleep(delay)
-    log.error("%s: poll of %s..%s still incomplete after %d attempts — the run "
-              "continues on the data already in the store, and data_through "
-              "will say so", area, day_from, day_to, attempts)
-    return False
+        failed = []
+        for job in pending:
+            area = job[0]
+            if area in errors:
+                continue
+            try:
+                if not poll(*job):
+                    failed.append(job)
+            except Exception:                    # logged with traceback, counted
+                errors.add(area)
+                log.exception("update: %s FAILED", area)
+        pending = failed
+        if not pending or n == attempts:
+            break
+        zones = ", ".join(sorted({j[0] for j in pending}))
+        if not _retry_allowed(now(), delay):
+            log.error("poll incomplete for %s (attempt %d of %d) and a retry in %d s "
+                      "would start less than %d min before the gate — no more "
+                      "retries; the forecast runs on what is in the store",
+                      zones, n, attempts, delay, cfg.retry_stop_minutes_before_gate())
+            break
+        log.warning("poll incomplete for %s (attempt %d of %d), retrying only "
+                    "these in %d s", zones, n, attempts, delay)
+        sleep(delay)
+    for area, day_from, day_to in pending:
+        log.error("%s: poll of %s..%s still incomplete — the run continues on the "
+                  "data already in the store, and data_through will say so",
+                  area, day_from, day_to)
+    return pending, errors
 
 
 def main() -> None:
@@ -397,7 +428,7 @@ def main() -> None:
 
     log = setup_logging()
 
-    def one(area: str) -> None:
+    def jobs_for(area: str) -> list[tuple[str, date, date]]:
         # The delivery day is the zone's own: "today" in Bucharest is not
         # "today" in Amsterdam for the hour they disagree, and asking the source
         # for a day that has not started there yet is how a window quietly loses
@@ -425,16 +456,18 @@ def main() -> None:
                      "— sent as %d requests: %s", area, day_from, day_to,
                      (day_to - day_from).days + 1, cfg.max_query_days(),
                      len(chunks), ", ".join(f"{c0}..{c1}" for c0, c1 in chunks))
+        # A chunk that never comes good does not stop the ones behind it. The
+        # store takes only changes, so a partial pass is worth exactly the part
+        # that arrived — and the part that did not is still missing afterwards,
+        # which is what the next run is for.
+        return [(area, c0, c1) for c0, c1 in chunks]
 
-        for c_from, c_to in chunks:
-            # A chunk that never came good does not stop the ones behind it. The
-            # store takes only changes, so a partial pass is worth exactly the
-            # part that arrived — and the part that did not is still missing
-            # afterwards, which is what the next run is for.
-            _poll_with_retry(c_from, c_to, area, log)
-
-    areas = a.areas or None
-    raise SystemExit(1 if for_each_area(one, log, "update", areas) else 0)
+    areas = list(a.areas or cfg.AREAS)
+    jobs = [j for area in areas for j in jobs_for(area)]
+    _, errors = poll_all(jobs, log)
+    if errors:
+        log.error("update: %d of %d zones failed", len(errors), len(areas))
+    raise SystemExit(1 if errors else 0)
 
 
 if __name__ == "__main__":
