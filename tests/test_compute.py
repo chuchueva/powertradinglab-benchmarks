@@ -936,3 +936,55 @@ if __name__ == "__main__":
             fn()
             print(f"ok  {name}")
     print("\nall checks passed")
+
+
+def test_one_failing_zone_does_not_make_the_others_wait():
+    """2026-11-03: NL failed twice and its two five-minute waits ran before the
+    other zones were asked. Now every zone is asked first, the wait is shared,
+    and only the failed job is repeated."""
+    import logging
+    from datetime import date
+
+    from src.update import poll_all
+
+    calls, sleeps = [], []
+    nl_failures = iter([False, False, True])
+
+    def poll(area, day_from, day_to):
+        calls.append(area)
+        return next(nl_failures) if area == "NL" else True
+
+    clock = [datetime(2026, 11, 3, 10, 40, tzinfo=timezone.utc)]
+
+    def sleep(s):
+        sleeps.append(s)
+        clock[0] += timedelta(seconds=s)
+
+    d = date(2026, 11, 3)
+    jobs = [(z, d, d) for z in ("NL", "RO", "EE", "SI")]
+    pending, errors = poll_all(jobs, logging.getLogger("test"), poll=poll,
+                               sleep=sleep, now=lambda: clock[0])
+    assert calls == ["NL", "RO", "EE", "SI", "NL", "NL"], calls
+    assert len(sleeps) == 2 and not pending and not errors
+
+
+def test_retries_stop_before_the_gate_and_an_exception_is_not_retried():
+    import logging
+    from datetime import date
+
+    from src.update import poll_all
+
+    calls = []
+
+    def poll(area, day_from, day_to):
+        calls.append(area)
+        if area == "RO":
+            raise RuntimeError("broken parser")
+        return False                                   # NL never comes good
+
+    d = date(2026, 11, 3)
+    late = datetime(2026, 11, 3, 10, 52, tzinfo=timezone.utc)   # 10:57 > 10:55
+    pending, errors = poll_all([("NL", d, d), ("RO", d, d)], logging.getLogger("test"),
+                               poll=poll, sleep=lambda s: None, now=lambda: late)
+    assert calls == ["NL", "RO"], calls
+    assert pending == [("NL", d, d)] and errors == {"RO"}
