@@ -20,7 +20,11 @@
     "HR",
     "CZ",
     "BE",
-    "CH"
+    "CH",
+    "AT",
+    "HU",
+    "LV",
+    "SK"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -43,15 +47,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
-    },
-    "FR": {
-      "eic": "10YFR-RTE------C",
-      "tz": "Europe/Paris",
-      "expect_currency": {
-        "DA": "EUR",
-        "IM": "EUR"
-      }
+      "mode": "live"
     },
     "RO": {
       "eic": "10YRO-TEL------P",
@@ -114,7 +110,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "AL": {
       "eic": "10YAL-KESH-----5",
@@ -142,16 +138,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
-    },
-    "ME": {
-      "eic": "10YCS-CG-TSO---S",
-      "tz": "Europe/Podgorica",
-      "expect_currency": {
-        "DA": "EUR",
-        "IM": "EUR"
-      },
-      "mode": "shadow"
+      "mode": "live"
     },
     "CZ": {
       "eic": "10YCZ-CEPS-----N",
@@ -160,11 +147,29 @@
         "DA": "EUR",
         "IM": "CZK"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "CH": {
       "eic": "10YCH-SWISSGRIDZ",
       "tz": "Europe/Zurich",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "live"
+    },
+    "AT": {
+      "eic": "10YAT-APG------L",
+      "tz": "Europe/Vienna",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "HU": {
+      "eic": "10YHU-MAVIR----U",
+      "tz": "Europe/Budapest",
       "expect_currency": {
         "DA": "EUR",
         "IM": "EUR"
