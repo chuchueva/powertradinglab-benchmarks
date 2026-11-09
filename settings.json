@@ -25,7 +25,9 @@
     "HU",
     "LV",
     "SK",
-    "GR"
+    "GR",
+    "FI",
+    "RS"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -180,6 +182,24 @@
     "GR": {
       "eic": "10YGR-HTSO-----Y",
       "tz": "Europe/Athens",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "FI": {
+      "eic": "10YFI-1--------U",
+      "tz": "Europe/Helsinki",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "RS": {
+      "eic": "10YCS-SERBIATSOV",
+      "tz": "Europe/Belgrade",
       "expect_currency": {
         "DA": "EUR",
         "IM": "EUR"
