@@ -963,7 +963,7 @@ def test_one_failing_zone_does_not_make_the_others_wait():
     d = date(2026, 11, 3)
     jobs = [(z, d, d) for z in ("NL", "RO", "EE", "SI")]
     pending, errors = poll_all(jobs, logging.getLogger("test"), poll=poll,
-                               sleep=sleep, now=lambda: clock[0])
+                               sleep=sleep, now=lambda: clock[0], workers=1, stagger_s=0)
     assert calls == ["NL", "RO", "EE", "SI", "NL", "NL"], calls
     assert len(sleeps) == 2 and not pending and not errors
 
@@ -988,3 +988,53 @@ def test_retries_stop_before_the_gate_and_an_exception_is_not_retried():
                                poll=poll, sleep=lambda s: None, now=lambda: late)
     assert calls == ["NL", "RO"], calls
     assert pending == [("NL", d, d)] and errors == {"RO"}
+
+
+def test_zones_are_polled_in_parallel_and_a_zone_keeps_its_own_order():
+    """2026-11-16: the source was slow for every zone, sixteen minutes one
+    after another. Four at a time; a zone's own chunks stay in order, because
+    a zone writes its own store."""
+    import logging
+    import threading
+    from datetime import date
+
+    from src.update import poll_all
+
+    lock, seen, running, peak = threading.Lock(), [], [0], [0]
+
+    def poll(area, day_from, day_to):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        import time as _t
+        _t.sleep(0.05)
+        with lock:
+            seen.append((area, day_from))
+            running[0] -= 1
+        return True
+
+    d1, d2 = date(2026, 10, 1), date(2026, 10, 31)
+    jobs = [("NL", d1, d1), ("NL", d2, d2)] + [(z, d1, d1) for z in ("RO", "EE", "SI", "BE", "CH")]
+    now = lambda: datetime(2026, 11, 16, 10, 40, tzinfo=timezone.utc)  # noqa: E731
+    pending, errors = poll_all(jobs, logging.getLogger("test"), poll=poll,
+                               sleep=lambda s: None, now=now, workers=4, stagger_s=0)
+    assert not pending and not errors
+    assert len(seen) == 7 and 2 <= peak[0] <= 4, (len(seen), peak[0])
+    nl = [d for a, d in seen if a == "NL"]
+    assert nl == [d1, d2], nl
+
+
+def test_no_zone_is_started_closer_than_five_minutes_to_the_gate():
+    import logging
+    from datetime import date
+
+    from src.update import poll_all
+
+    calls = []
+    d = date(2026, 11, 16)
+    late = datetime(2026, 11, 16, 10, 56, tzinfo=timezone.utc)   # gate 11:00
+    pending, errors = poll_all([("NL", d, d), ("RO", d, d)], logging.getLogger("test"),
+                               poll=lambda *j: calls.append(j[0]) or True,
+                               sleep=lambda s: None, now=lambda: late)
+    assert calls == [] and len(pending) == 2 and not errors
+
