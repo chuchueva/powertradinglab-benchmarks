@@ -23,9 +23,6 @@
     "CH",
     "AT",
     "HU",
-    "LV",
-    "SK",
-    "GR",
     "FI",
     "RS"
   ],
@@ -61,15 +58,6 @@
       },
       "mode": "live"
     },
-    "LV": {
-      "eic": "10YLV-1001A00074",
-      "tz": "Europe/Riga",
-      "expect_currency": {
-        "DA": "EUR",
-        "IM": "EUR"
-      },
-      "mode": "shadow"
-    },
     "EE": {
       "eic": "10Y1001A1001A39I",
       "tz": "Europe/Tallinn",
@@ -78,15 +66,6 @@
         "IM": "EUR"
       },
       "mode": "live"
-    },
-    "SK": {
-      "eic": "10YSK-SEPS-----K",
-      "tz": "Europe/Bratislava",
-      "expect_currency": {
-        "DA": "EUR",
-        "IM": "EUR"
-      },
-      "mode": "shadow"
     },
     "SI": {
       "eic": "10YSI-ELES-----O",
@@ -168,7 +147,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "HU": {
       "eic": "10YHU-MAVIR----U",
@@ -177,16 +156,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
-    },
-    "GR": {
-      "eic": "10YGR-HTSO-----Y",
-      "tz": "Europe/Athens",
-      "expect_currency": {
-        "DA": "EUR",
-        "IM": "EUR"
-      },
-      "mode": "shadow"
+      "mode": "live"
     },
     "FI": {
       "eic": "10YFI-1--------U",
@@ -195,7 +165,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "RS": {
       "eic": "10YCS-SERBIATSOV",
@@ -204,7 +174,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     }
   },
   "stat_action": {
@@ -225,7 +195,10 @@
     "refetch_time_utc": "08:00",
     "retry_attempts": 4,
     "retry_delay_s": 300,
-    "retry_stop_minutes_before_gate": 5
+    "retry_stop_minutes_before_gate": 5,
+    "poll_workers": 4,
+    "poll_stagger_s": 3,
+    "poll_stop_minutes_before_gate": 5
   },
   "paths": {
     "processed": "data/processed",

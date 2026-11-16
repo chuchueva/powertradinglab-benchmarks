@@ -453,6 +453,30 @@ def retry_delay_s() -> int:
     return int(_UPDATE.get("retry_delay_s", 300))
 
 
+def poll_workers() -> int:
+    """How many zones are polled at the same time (2026-11-16). The source
+    answers each request in 10-15 s on a good day and 30-70 s on a slow one,
+    the same for every zone; polled one after another, sixteen zones took
+    twelve minutes on 2026-11-10 and sixteen on 2026-11-16. Four at a time
+    keeps a slow day inside the margin. One zone's documents stay in order —
+    a zone writes its own store, and two writers to it would race."""
+    return max(1, int(_UPDATE.get("poll_workers", 4)))
+
+
+def poll_stagger_s() -> float:
+    """Seconds between starting two zones, so the requests do not leave in one
+    burst."""
+    return float(_UPDATE.get("poll_stagger_s", 3))
+
+
+def poll_stop_minutes_before_gate() -> int:
+    """No zone is STARTED later than this before the gate (2026-11-16). The
+    retry limit alone did not cover a slow first pass: on 2026-11-16 the
+    forecast ran at 10:56:30 with no retry at all. A zone not reached by then
+    is decided on what its store already holds."""
+    return int(_UPDATE.get("poll_stop_minutes_before_gate", 5))
+
+
 def retry_stop_minutes_before_gate() -> int:
     """No retry may start later than this before the gate (2026-10-31). With
     the run 20 minutes before the gate, four attempts five minutes apart would

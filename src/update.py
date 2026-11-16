@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -350,23 +351,37 @@ def _retry_allowed(now: datetime, delay_s: int) -> bool:
     return now + timedelta(seconds=delay_s) <= stop
 
 
+def _start_allowed(now: datetime) -> bool:
+    """May a zone's poll still be STARTED at `now` (2026-11-16)? Before today's
+    gate only up to poll_stop_minutes_before_gate before it; after the gate
+    (catch-up, monthly) always."""
+    gate = auction_gate(now.date() + timedelta(days=1))
+    if now >= gate:
+        return True
+    return now <= gate - timedelta(minutes=cfg.poll_stop_minutes_before_gate())
+
+
 def poll_all(jobs: list[tuple[str, date, date]], log, poll=None,
-             sleep=time.sleep, now=None) -> tuple[list, set]:
+             sleep=time.sleep, now=None, workers: int | None = None,
+             stagger_s: float | None = None) -> tuple[list, set]:
     """
-    Poll every (area, day_from, day_to) once, then retry ONLY what failed.
+    Poll every (area, day_from, day_to), several zones at a time, then retry
+    ONLY what failed.
 
     Retry, because there is only ONE poll a day and it sits on the decision
     itself (2026-08-07: both documents failed at the 09:30 slot and the
     forecast ran on the previous day's data). A failed fetch does not raise —
     update() records it and returns — so success is read from the poll log.
 
-    Two passes, not a retry loop inside each zone (2026-11-04). On 2026-11-03
-    NL's day-ahead request failed twice at the source; its two five-minute
-    waits ran BEFORE the other eleven zones were even asked, and the forecast
-    came out at 10:56:11, four minutes before the gate. Now every zone is
-    asked first, the wait is shared, and only the failed jobs are repeated —
-    a failure in one zone costs the others nothing. Retries stop at
-    `_retry_allowed` (the gate minus retry_stop_minutes_before_gate).
+    Two passes, not a retry loop inside each zone (2026-11-04): on 2026-11-03
+    NL's two five-minute waits ran before the other zones were even asked.
+
+    Zones in parallel, `workers` at a time, started `stagger_s` apart
+    (2026-11-16): the source was slow for EVERY zone on 2026-11-10 (12 min)
+    and 2026-11-16 (16 min), with no failure and no retry. A zone's own jobs
+    run in order in one worker — it writes its own store. No zone is started
+    later than poll_stop_minutes_before_gate before the gate; it keeps what its
+    store holds and is reported as pending. Retries stop at `_retry_allowed`.
 
     An exception is not a failed fetch: it is logged with its traceback, the
     zone is counted in `errors`, and it is not retried.
@@ -378,22 +393,54 @@ def poll_all(jobs: list[tuple[str, date, date]], log, poll=None,
 
     poll = poll or _default_poll
     now = now or (lambda: datetime.now(timezone.utc))
+    workers = workers or cfg.poll_workers()
+    stagger = cfg.poll_stagger_s() if stagger_s is None else stagger_s
     attempts, delay = cfg.retry_attempts(), cfg.retry_delay_s()
     errors: set[str] = set()
-    pending = list(jobs)
-    for n in range(1, attempts + 1):
-        failed = []
+
+    def run_area(area_jobs):
+        # The deadline is checked when the zone actually STARTS, in its worker:
+        # with four workers the rest wait in the queue, and the moment they were
+        # queued says nothing about when they will run.
+        if not _start_allowed(now()):
+            return [], list(area_jobs)
+        return [job for job in area_jobs if not poll(*job)], []
+
+    def one_pass(pending):
+        by_area: dict[str, list] = {}
         for job in pending:
-            area = job[0]
-            if area in errors:
-                continue
-            try:
-                if not poll(*job):
-                    failed.append(job)
-            except Exception:                    # logged with traceback, counted
-                errors.add(area)
-                log.exception("update: %s FAILED", area)
-        pending = failed
+            if job[0] not in errors:
+                by_area.setdefault(job[0], []).append(job)
+        failed, not_started = [], []
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {}
+            for i, (area, area_jobs) in enumerate(by_area.items()):
+                if not _start_allowed(now()):
+                    not_started += area_jobs
+                    continue
+                if i and stagger:
+                    sleep(stagger)
+                futures[ex.submit(run_area, area_jobs)] = area
+            for fut in as_completed(futures):
+                area = futures[fut]
+                try:
+                    f, late = fut.result()
+                    failed += f
+                    not_started += late
+                except Exception:                    # logged with traceback, counted
+                    errors.add(area)
+                    log.exception("update: %s FAILED", area)
+        if not_started:
+            log.error("poll: %s not requested — less than %d min to the gate; "
+                      "the forecast runs on what their stores hold",
+                      ", ".join(sorted({j[0] for j in not_started})),
+                      cfg.poll_stop_minutes_before_gate())
+        return failed, not_started
+
+    pending, skipped = list(jobs), []
+    for n in range(1, attempts + 1):
+        pending, not_started = one_pass(pending)
+        skipped += not_started
         if not pending or n == attempts:
             break
         zones = ", ".join(sorted({j[0] for j in pending}))
@@ -410,7 +457,7 @@ def poll_all(jobs: list[tuple[str, date, date]], log, poll=None,
         log.error("%s: poll of %s..%s still incomplete — the run continues on the "
                   "data already in the store, and data_through will say so",
                   area, day_from, day_to)
-    return pending, errors
+    return pending + skipped, errors
 
 
 def main() -> None:
