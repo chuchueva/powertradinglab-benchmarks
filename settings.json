@@ -27,7 +27,8 @@
     "RS",
     "DK2",
     "FR",
-    "PL"
+    "PL",
+    "LV"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -203,6 +204,15 @@
       "expect_currency": {
         "DA": "EUR",
         "IM": "PLN"
+      },
+      "mode": "shadow"
+    },
+    "LV": {
+      "eic": "10YLV-1001A00074",
+      "tz": "Europe/Riga",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
       },
       "mode": "shadow"
     }
