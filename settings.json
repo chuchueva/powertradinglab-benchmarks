@@ -24,7 +24,10 @@
     "AT",
     "HU",
     "FI",
-    "RS"
+    "RS",
+    "DK2",
+    "FR",
+    "PL"
   ],
   "day_ahead": {
     "gate_local": "12:00",
@@ -175,6 +178,33 @@
         "IM": "EUR"
       },
       "mode": "live"
+    },
+    "DK2": {
+      "eic": "10YDK-2--------M",
+      "tz": "Europe/Copenhagen",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "FR": {
+      "eic": "10YFR-RTE------C",
+      "tz": "Europe/Paris",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "EUR"
+      },
+      "mode": "shadow"
+    },
+    "PL": {
+      "eic": "10YPL-AREA-----S",
+      "tz": "Europe/Warsaw",
+      "expect_currency": {
+        "DA": "EUR",
+        "IM": "PLN"
+      },
+      "mode": "shadow"
     }
   },
   "stat_action": {
