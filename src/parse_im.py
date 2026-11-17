@@ -2,7 +2,10 @@
 Imbalance (A85) price parser: raw ZIP bytes -> clean pandas DataFrame.
 
 Input:  the ZIP the ENTSO-E A85 endpoint returns (ingest saves it verbatim).
-        Inside is a single Balancing_MarketDocument XML.
+        Inside is one Balancing_MarketDocument XML per document the TSO
+        uploaded, so a request spanning two uploads holds two files. Every
+        file is parsed and the results are merged (PL, 2026-11-17: the second
+        file used to be dropped silently).
 Output: a DataFrame with one row per 15-minute settlement MTU:
             delivery_ts    (UTC, tz-aware, start of the MTU)
             knownby_ts     (UTC, tz-aware, the document's <createdDateTime>)
@@ -82,23 +85,30 @@ def _expected_point_count(start: datetime, end: datetime, minutes: int) -> int:
     return total_minutes // minutes
 
 
-def _unzip_to_xml(raw: bytes) -> str:
+def _unzip_to_xmls(raw: bytes) -> list[tuple[str, str]]:
     """
-    Take the raw A85 response bytes and return the inner XML text.
+    Take the raw A85 response bytes and return every inner XML as (name, text).
 
-    ENTSO-E wraps A85 in a ZIP (magic 'PK'). If we ever get bare XML instead,
-    pass it straight through so the parser still works.
+    ENTSO-E wraps A85 in a ZIP (magic 'PK') with one XML file per document the
+    TSO uploaded. A request that spans two uploads therefore comes back as two
+    files, and both carry data: reading only the first lost the second
+    (PL 2026-11-17: 139 of ~1556 quarter-hours stored). If we ever get bare XML
+    instead, it is returned as a list of one, so the parser still works.
     """
     if raw[:2] != b"PK":
-        return raw.decode("utf-8")
+        return [("<bare xml>", raw.decode("utf-8"))]
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
         names = zf.namelist()
         if not names:
             raise ValueError("A85 ZIP is empty.")
-        # There is one member per response; guard if that ever changes.
         xml_members = [n for n in names if n.lower().endswith(".xml")]
-        member = xml_members[0] if xml_members else names[0]
-        return zf.read(member).decode("utf-8")
+        if not xml_members:
+            xml_members = names
+        out = []
+        for member in sorted(xml_members):
+            text = zf.read(member).decode("utf-8")
+            out.append((member, text))
+        return out
 
 
 def _forward_fill_period(period_el) -> tuple[dict[str, dict[datetime, float]],
@@ -165,9 +175,15 @@ def _single_currency(currencies: set[str], doc: str) -> str | None:
     return next(iter(currencies)) if currencies else None
 
 
-def parse_im_bytes(raw: bytes) -> ParseResult:
-    """Parse raw A85 response bytes (ZIP or bare XML) into a ParseResult."""
-    xml_text = _unzip_to_xml(raw)
+def _parse_document(xml_text: str, name: str) -> dict:
+    """
+    One Balancing_MarketDocument -> its prices and counts, not yet merged.
+
+    Returns a dict with series_by_cat ({category: {delivery_ts: price}}),
+    explicit_by_cat, n_expected, n_series, currencies, sender_eic, area,
+    knownby_ts. Within one document a later Period overwrites an earlier one
+    for the same delivery_ts, as before.
+    """
     root = etree.fromstring(xml_text.encode("utf-8"))
     # Checked BEFORE the type: an acknowledgement has no <type> at all, so the
     # type check would report a missing field and hide the actual answer.
@@ -175,7 +191,7 @@ def parse_im_bytes(raw: bytes) -> ParseResult:
 
     doc_type = root.findtext("{*}type")
     if doc_type != "A85":
-        raise ValueError(f"Expected documentType A85, got {doc_type!r}")
+        raise ValueError(f"{name}: expected documentType A85, got {doc_type!r}")
 
     sender = root.find("{*}sender_MarketParticipant.mRID")
     sender_eic = sender.text if sender is not None else None
@@ -183,15 +199,13 @@ def parse_im_bytes(raw: bytes) -> ParseResult:
 
     created_text = root.findtext("{*}createdDateTime")
     if not created_text:
-        raise ValueError("Missing <createdDateTime> in A85 document.")
+        raise ValueError(f"{name}: missing <createdDateTime> in A85 document.")
     knownby_ts = _parse_utc(created_text)
 
-    # Accumulate {category: {delivery_ts: price}} across all TimeSeries/Periods.
-    merged: dict[str, dict[datetime, float]] = {}
-    explicit_total: dict[str, int] = {}
-    expected_total = 0
+    series_by_cat: dict[str, dict[datetime, float]] = {}
+    explicit_by_cat: dict[str, int] = {}
+    n_expected = 0
     n_series = 0
-
     currencies: set[str] = set()
 
     for ts_el in root.findall("{*}TimeSeries"):
@@ -200,11 +214,74 @@ def parse_im_bytes(raw: bytes) -> ParseResult:
         if cur:
             currencies.add(cur)
         for period_el in ts_el.findall("{*}Period"):
-            series_by_cat, explicit_counts, n_expected = _forward_fill_period(period_el)
-            expected_total += n_expected
-            for cat, series in series_by_cat.items():
-                merged.setdefault(cat, {}).update(series)
-                explicit_total[cat] = explicit_total.get(cat, 0) + explicit_counts[cat]
+            period_series, explicit_counts, period_expected = _forward_fill_period(period_el)
+            n_expected += period_expected
+            for cat, series in period_series.items():
+                series_by_cat.setdefault(cat, {}).update(series)
+                explicit_by_cat[cat] = explicit_by_cat.get(cat, 0) + explicit_counts[cat]
+
+    return {
+        "series_by_cat": series_by_cat,
+        "explicit_by_cat": explicit_by_cat,
+        "n_expected": n_expected,
+        "n_series": n_series,
+        "currencies": currencies,
+        "sender_eic": sender_eic,
+        "area": area,
+        "knownby_ts": knownby_ts,
+    }
+
+
+def parse_im_bytes(raw: bytes) -> ParseResult:
+    """
+    Parse raw A85 response bytes (ZIP or bare XML) into a ParseResult.
+
+    Every XML file of the ZIP is parsed and the files are merged on
+    delivery_ts. The files seen so far cover disjoint intervals (CZ 2026-11-05:
+    the second file is exactly the one quarter-hour missing from the first).
+    The same quarter-hour in two files with the same price is kept once; with
+    DIFFERENT prices the response is refused — which one is right is the
+    source's to say, not ours (rule 9).
+    """
+    documents = _unzip_to_xmls(raw)
+
+    merged: dict[str, dict[datetime, float]] = {}
+    owner: dict[str, dict[datetime, str]] = {}
+    explicit_total: dict[str, int] = {}
+    expected_total = 0
+    n_series = 0
+    currencies: set[str] = set()
+    areas: set[str] = set()
+    sender_eic = None
+    knownby_ts = None
+
+    for name, xml_text in documents:
+        doc = _parse_document(xml_text, name)
+        n_series += doc["n_series"]
+        expected_total += doc["n_expected"]
+        currencies |= doc["currencies"]
+        if doc["area"]:
+            areas.add(doc["area"])
+        if sender_eic is None:
+            sender_eic = doc["sender_eic"]
+        if knownby_ts is None or doc["knownby_ts"] > knownby_ts:
+            knownby_ts = doc["knownby_ts"]
+        for cat, series in doc["series_by_cat"].items():
+            cat_merged = merged.setdefault(cat, {})
+            cat_owner = owner.setdefault(cat, {})
+            for ts, price in series.items():
+                if ts in cat_merged and cat_merged[ts] != price:
+                    raise ValueError(
+                        f"A85 files disagree on {cat} at {ts.isoformat()}: "
+                        f"{cat_owner[ts]} says {cat_merged[ts]}, {name} says {price}"
+                    )
+                cat_merged[ts] = price
+                cat_owner[ts] = name
+            explicit_total[cat] = explicit_total.get(cat, 0) + doc["explicit_by_cat"][cat]
+
+    if len(areas) > 1:
+        raise ValueError(f"A85 files carry several areas: {sorted(areas)}")
+    area = next(iter(areas)) if areas else None
 
     # Build wide DataFrame: one row per delivery_ts, one column per category.
     frames = []
@@ -237,6 +314,8 @@ def parse_im_bytes(raw: bytes) -> ParseResult:
         "area_domain": area,
         "currency": currency,
         "knownby_ts": knownby_ts.isoformat(),
+        "n_files": len(documents),
+        "files": [name for name, _ in documents],
         "n_timeseries": n_series,
         "n_expected_points_per_category": expected_total // max(len(merged), 1),
         "categories": sorted(merged.keys()),

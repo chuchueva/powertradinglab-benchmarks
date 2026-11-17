@@ -320,6 +320,91 @@ def test_an_hourly_imbalance_price_fills_its_four_quarters():
     assert len(df) == 4
     assert (df["price_im_long"] == 55.0).all()
 
+def _a85_member(start: str, end: str, prices: list[float]) -> str:
+    """One A85 document: quarter-hour prices from `start`, single-price (A04 only)."""
+    points = ""
+    for i, price in enumerate(prices, start=1):
+        points += (f"<Point><position>{i}</position>"
+                   f"<imbalance_Price.amount>{price}</imbalance_Price.amount>"
+                   f"<imbalance_Price.category>A04</imbalance_Price.category></Point>")
+    return f"""<Balancing_MarketDocument>
+      <type>A85</type>
+      <createdDateTime>2026-11-17T10:20:31Z</createdDateTime>
+      <TimeSeries><currency_Unit.name>PLN</currency_Unit.name>
+        <Period>
+          <timeInterval><start>{start}</start><end>{end}</end></timeInterval>
+          <resolution>PT15M</resolution>
+          {points}
+        </Period>
+      </TimeSeries>
+    </Balancing_MarketDocument>"""
+
+
+def _a85_zip(members: dict[str, str]) -> bytes:
+    """A ZIP shaped like the one ENTSO-E returns: one XML file per document."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, xml in members.items():
+            zf.writestr(name, xml)
+    return buf.getvalue()
+
+
+def test_every_file_of_an_imbalance_zip_is_read():
+    """
+    PL 2026-11-17: the ZIP held two files, the newest day first. Only the first
+    was read, and 139 quarter-hours of ~1556 reached the store. Both count.
+    """
+    raw = _a85_zip({
+        "001-IMBALANCE_PRICES_R3_202611152300-202611152345.xml":
+            _a85_member("2026-11-15T23:00Z", "2026-11-15T23:45Z", [30, 31, 32]),
+        "002-IMBALANCE_PRICES_R3_202610312300-202610312345.xml":
+            _a85_member("2026-10-31T23:00Z", "2026-10-31T23:45Z", [10, 11, 12]),
+    })
+    res = parse_im_bytes(raw)
+    assert res.meta["n_files"] == 2
+    assert len(res.df) == 6
+    assert list(res.df["price_im_long"]) == [10.0, 11.0, 12.0, 30.0, 31.0, 32.0]
+    assert res.df["delivery_ts"].is_monotonic_increasing
+
+
+def test_a_second_file_closes_a_gap_in_the_first():
+    """
+    CZ 2026-11-05: the first file skips 23:45, the second is exactly that one
+    quarter-hour. Together they make an unbroken run.
+    """
+    raw = _a85_zip({
+        "001.xml": _a85_member("2026-11-04T23:00Z", "2026-11-04T23:45Z", [1, 2, 3]),
+        "002.xml": _a85_member("2026-11-04T23:45Z", "2026-11-05T00:00Z", [4]),
+    })
+    df = parse_im_bytes(raw).df
+    assert len(df) == 4
+    assert (df["delivery_ts"].diff().dropna() == pd.Timedelta(minutes=15)).all()
+    assert list(df["price_im_long"]) == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_two_files_with_the_same_price_give_one_row():
+    raw = _a85_zip({
+        "001.xml": _a85_member("2026-11-04T23:00Z", "2026-11-04T23:30Z", [1, 2]),
+        "002.xml": _a85_member("2026-11-04T23:15Z", "2026-11-04T23:45Z", [2, 3]),
+    })
+    df = parse_im_bytes(raw).df
+    assert len(df) == 3
+    assert list(df["price_im_long"]) == [1.0, 2.0, 3.0]
+
+
+def test_two_files_disagreeing_on_a_price_are_refused():
+    """Which of two prices is right is the source's to say, not ours (rule 9)."""
+    import pytest
+    raw = _a85_zip({
+        "001.xml": _a85_member("2026-11-04T23:00Z", "2026-11-04T23:30Z", [1, 2]),
+        "002.xml": _a85_member("2026-11-04T23:15Z", "2026-11-04T23:45Z", [99, 3]),
+    })
+    with pytest.raises(ValueError, match="disagree"):
+        parse_im_bytes(raw)
+
+
 def test_imbalance_can_live_under_another_code(monkeypatch):
     """
     DE_LU: day-ahead under 10Y1001A1001A82H, imbalance under DE
