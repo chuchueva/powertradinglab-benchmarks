@@ -28,6 +28,19 @@ Trailing-bias window, per row, tied to timestamps (not "the last N rows"):
 A hole anywhere in the window is an <NA> in a named cell, and the rule then
 gives no action. A partly published hour never enters the window.
 
+    price_da_dk, price_im_buy_dk, price_im_sell_dk
+                                    the bare prices of the same slot, EUR/MWh
+                                    (mean over the slot); buy = the higher
+                                    imbalance price, sell = the lower — the
+                                    sides always_buy / always_sell are valued
+                                    at. Equal in a single-price zone.
+
+STEP (2026-11-19): every function takes `step`, the size of one row —
+"h" (default, one row per delivery hour; what trailing bias uses live) or
+"15min" (one row per quarter-hour; for the models). With "15min" a slot is
+"whole" when its one quarter-hour is published; with "h", when all four are.
+The d1 rule is the same for both: it is about market DAYS, not about slots.
+
 UTC hours are always 4 quarter-hours long, and one day back is 24 h back;
 the market-day test above is the only place local time enters.
 """
@@ -40,25 +53,43 @@ from src.period import market_tz
 from src.workflow import load_store
 
 PTU_PER_HOUR = 4
+PTU_PER_SLOT = {"h": 4, "15min": 1}   # quarter-hours in one row, per step
 N_LAGS = 14   # the matrix carries d1..d14; each model takes what it needs
 DAY = pd.Timedelta(days=1)
 
 
+def slots(m: pd.DataFrame, step: str = "h") -> pd.DataFrame:
+    """
+    Quarter-hour matrix -> one row per slot of `step`: always_buy and
+    always_sell summed, the three bare prices averaged, PTU count.
+    The column is called hour_ts for both steps (it is the slot start).
+    A matrix without prices (synthetic test data) gives the sums only.
+    """
+    h = m.assign(hour_ts=m["delivery_ts"].dt.floor(step))
+    agg = {"always_buy": ("always_buy", "sum"),
+           "always_sell": ("always_sell", "sum")}
+    has_prices = "price_da" in m.columns and all(c in m.columns for c in C._EUR_COLS)
+    if has_prices:
+        h["price_im_buy"] = m[C._EUR_COLS].max(axis=1)
+        h["price_im_sell"] = m[C._EUR_COLS].min(axis=1)
+        agg["price_da"] = ("price_da", "mean")
+        agg["price_im_buy"] = ("price_im_buy", "mean")
+        agg["price_im_sell"] = ("price_im_sell", "mean")
+    agg["ptu"] = ("delivery_ts", "size")
+    return h.groupby("hour_ts", as_index=False).agg(**agg)
+
+
 def hourly(m: pd.DataFrame) -> pd.DataFrame:
-    """Quarter-hour matrix -> one row per delivery hour: sums and PTU count."""
-    h = m.assign(hour_ts=m["delivery_ts"].dt.floor("h"))
-    return h.groupby("hour_ts", as_index=False).agg(
-        always_buy=("always_buy", "sum"),
-        always_sell=("always_sell", "sum"),
-        ptu=("delivery_ts", "size"),
-    )
+    """Quarter-hour matrix -> one row per delivery hour (slots with step "h")."""
+    return slots(m, "h")
 
 
-def rows_for(knownby_ts: pd.Timestamp, area: str) -> pd.DataFrame:
-    """The empty matrix rows of one decision: the delivery hours of the day
-    the auction closing on knownby_ts serves, plus `need` (yesterday's market
-    day relative to the decision, naive date)."""
-    hours = wc._target_grid(knownby_ts, area).floor("h").unique()
+def rows_for(knownby_ts: pd.Timestamp, area: str, step: str = "h") -> pd.DataFrame:
+    """The empty matrix rows of one decision: the delivery slots (hours, or
+    quarter-hours with step "15min") of the day the auction closing on
+    knownby_ts serves, plus `need` (yesterday's market day relative to the
+    decision, naive date)."""
+    hours = wc._target_grid(knownby_ts, area).floor(step).unique()
     rows = pd.DataFrame({"delivery_ts": hours})
     rows["knownby_ts"] = knownby_ts
     rows["area"] = area
@@ -67,10 +98,10 @@ def rows_for(knownby_ts: pd.Timestamp, area: str) -> pd.DataFrame:
 
 
 def window(rows: pd.DataFrame, h: pd.DataFrame, n_lags: int, fresh: bool,
-           area: str) -> pd.DataFrame:
+           area: str, step: str = "h") -> pd.DataFrame:
     """Add the d1..dN columns to `rows` (delivery_ts, need; any number of
-    decisions at once)."""
-    whole = h[h["ptu"] == PTU_PER_HOUR].set_index("hour_ts")
+    decisions at once). `h` is slots(m, step) with the same step as rows."""
+    whole = h[h["ptu"] == PTU_PER_SLOT[step]].set_index("hour_ts")
     ptu = h.set_index("hour_ts")["ptu"]
     need = rows["need"]
     today = need + DAY
@@ -107,11 +138,14 @@ def window(rows: pd.DataFrame, h: pd.DataFrame, n_lags: int, fresh: bool,
         rows[f"ptu_d{k}"] = ts.map(ptu).fillna(0).astype(int)
         rows[f"always_buy_d{k}"] = ts.map(whole["always_buy"]).where(found)
         rows[f"always_sell_d{k}"] = ts.map(whole["always_sell"]).where(found)
+        for col in ("price_da", "price_im_buy", "price_im_sell"):
+            if col in whole.columns:
+                rows[f"{col}_d{k}"] = ts.map(whole[col]).where(found)
     return rows.drop(columns=["need"])
 
 
 def matrix_from(m: pd.DataFrame, knownby_ts: pd.Timestamp, area: str,
-                n_lags: int = None, fresh: bool = True) -> pd.DataFrame:
+                n_lags: int = None, fresh: bool = True, step: str = "h") -> pd.DataFrame:
     """
     Matrix rows for one decision, from the quarter-hour matrix `m` as it
     stood at knownby_ts (already as_of, valued, with add_pnl).
@@ -119,23 +153,27 @@ def matrix_from(m: pd.DataFrame, knownby_ts: pd.Timestamp, area: str,
     This is the function the live forecast calls.
     """
     n_lags = n_lags or N_LAGS
-    x = window(rows_for(knownby_ts, area), hourly(m), n_lags, fresh, area)
+    rows = rows_for(knownby_ts, area, step)
+    s = slots(m, step)
+    x = window(rows, s, n_lags, fresh, area, step)
     return calendar(x, area)
 
 
 def matrix_at(da: pd.DataFrame, im: pd.DataFrame, knownby_ts: pd.Timestamp,
-              area: str, n_lags: int = None, fresh: bool = True) -> pd.DataFrame:
+              area: str, n_lags: int = None, fresh: bool = True,
+              step: str = "h") -> pd.DataFrame:
     """matrix_from, starting from the whole store (as_of applied here)."""
     m = wc._matrix_from_legs(C.as_of(da, knownby_ts), C.as_of(im, knownby_ts),
                              knownby_ts, area)
-    return matrix_from(m, knownby_ts, area, n_lags, fresh)
+    return matrix_from(m, knownby_ts, area, n_lags, fresh, step)
 
 
-def build_matrix(area: str, knownby_list, n_lags: int = None, fresh: bool = True) -> pd.DataFrame:
+def build_matrix(area: str, knownby_list, n_lags: int = None, fresh: bool = True,
+                 step: str = "h") -> pd.DataFrame:
     """Matrix rows for many decisions. The store is read once."""
     n_lags = n_lags or N_LAGS
     da, im = load_store(area)
-    parts = [matrix_at(da, im, pd.Timestamp(t), area, n_lags, fresh) for t in knownby_list]
+    parts = [matrix_at(da, im, pd.Timestamp(t), area, n_lags, fresh, step) for t in knownby_list]
     return pd.concat(parts, ignore_index=True)
 
 
@@ -144,8 +182,8 @@ def calendar(x: pd.DataFrame, area: str) -> pd.DataFrame:
     Calendar columns of the delivery hour — known at any instant, so they are
     inputs. Local time is the market's own (the zone's timezone).
 
-        hour_utc, hour_local, weekday_local (0 = Monday), month_local,
-        is_weekend
+        hour_utc, hour_local, quarter_of_hour (0..3; 0 for hourly rows),
+        weekday_local (0 = Monday), month_local, is_weekend
 
     Public holidays are NOT here yet: they need a per-country calendar, and
     the `holidays` package is not a dependency. Placeholder: is_holiday = 0.
@@ -154,6 +192,7 @@ def calendar(x: pd.DataFrame, area: str) -> pd.DataFrame:
     x = x.copy()
     x["hour_utc"] = x["delivery_ts"].dt.hour
     x["hour_local"] = local.dt.hour
+    x["quarter_of_hour"] = x["delivery_ts"].dt.minute // 15
     x["weekday_local"] = local.dt.weekday
     x["month_local"] = local.dt.month
     x["is_weekend"] = (x["weekday_local"] >= 5).astype(int)
@@ -179,7 +218,7 @@ def _latest_matrix(area: str) -> pd.DataFrame:
     return wc._matrix_from_legs(C.as_of(da, now), C.as_of(im, now), now, area)
 
 
-def backtest_matrix(areas, start, end, n_lags: int = None) -> pd.DataFrame:
+def backtest_matrix(areas, start, end, n_lags: int = None, step: str = "h") -> pd.DataFrame:
     """
     The training / backtest matrix — inputs only. One decision per day in
     [start, end], for one zone or a list of zones (stacked, `area` column).
@@ -198,16 +237,17 @@ def backtest_matrix(areas, start, end, n_lags: int = None) -> pd.DataFrame:
     n_lags = n_lags or N_LAGS
     parts = []
     for area in areas:
-        h = hourly(_latest_matrix(area))
-        rows = pd.concat([rows_for(t, area) for t in decision_instants(start, end)],
+        h = slots(_latest_matrix(area), step)
+        rows = pd.concat([rows_for(t, area, step) for t in decision_instants(start, end)],
                          ignore_index=True)
-        parts.append(calendar(window(rows, h, n_lags, fresh=False, area=area), area))
+        x = window(rows, h, n_lags, fresh=False, area=area, step=step)
+        parts.append(calendar(x, area))
     return pd.concat(parts, ignore_index=True)
 
 
-def outcome(areas) -> pd.DataFrame:
+def outcome(areas, step: str = "h") -> pd.DataFrame:
     """
-    What each delivery hour actually paid, per 1 MW, from the benchmark
+    What each delivery slot (hour, or quarter-hour with step "15min") actually paid, per 1 MW, from the benchmark
     (benchmarks_core.add_pnl): always_buy, always_sell, ideal, devil, ptu.
     Store's latest versions. Join to the matrix on (area, delivery_ts).
     """
@@ -215,7 +255,7 @@ def outcome(areas) -> pd.DataFrame:
     parts = []
     for area in areas:
         m = _latest_matrix(area)
-        h = (m.assign(delivery_ts=m["delivery_ts"].dt.floor("h"))
+        h = (m.assign(delivery_ts=m["delivery_ts"].dt.floor(step))
                .groupby("delivery_ts", as_index=False)
                .agg(always_buy=("always_buy", "sum"), always_sell=("always_sell", "sum"),
                     ideal=("ideal", "sum"), devil=("devil", "sum"),
@@ -229,6 +269,13 @@ def lag_columns(n: int) -> list[str]:
     """always_buy_d1..dn and always_sell_d1..dn — the lag inputs."""
     return ([f"always_buy_d{k}" for k in range(1, n + 1)]
             + [f"always_sell_d{k}" for k in range(1, n + 1)])
+
+
+def price_columns(n: int) -> list[str]:
+    """price_da_d1..dn, price_im_buy_d1..dn, price_im_sell_d1..dn — bare prices."""
+    return ([f"price_da_d{k}" for k in range(1, n + 1)]
+            + [f"price_im_buy_d{k}" for k in range(1, n + 1)]
+            + [f"price_im_sell_d{k}" for k in range(1, n + 1)])
 
 
 CALENDAR_COLUMNS = ["hour_local", "weekday_local", "month_local", "is_weekend", "is_holiday"]
