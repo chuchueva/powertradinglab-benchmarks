@@ -12,7 +12,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.benchmarks_core as C                     # noqa: E402
 from models.actions import to_action                # noqa: E402
-from models.features import hourly, rows_for, window  # noqa: E402
+from models.features import calendar, hourly, rows_for, slots, window  # noqa: E402
 from models.trailing_bias import decide             # noqa: E402
 from src.period import market_day_bounds           # noqa: E402
 
@@ -112,3 +112,70 @@ def test_action_pnl_is_one_function_for_every_action():
     a = pd.array([1, -1, 0, None], dtype="Int8")
     out = C.action_pnl(a, [10.0] * 4, [-3.0] * 4)
     assert out[:3].tolist() == [10.0, -3.0, 0.0] and np.isnan(out[3])
+
+
+# --- 15-minute rows (step="15min", 2026-11-19) --------------------------------
+
+def _x15(m, knownby, area="NL", fresh=True):
+    t = pd.Timestamp(knownby, tz="UTC")
+    rows = rows_for(t, area, "15min")
+    s15 = slots(m, "15min")
+    return window(rows, s15, N, fresh, area, "15min")
+
+
+def test_a_15min_day_has_one_row_per_quarter_hour():
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    x = _x15(m, "2026-09-26 09:40")
+    assert len(x) == 96
+    assert x["delivery_ts"].is_unique
+
+
+def test_the_autumn_daylight_saving_day_has_100_quarter_hours():
+    """NL, delivery day 2026-10-25 (clocks go back): 100 quarter-hours."""
+    m = _m(_days("2026-10-20", "2026-10-24"))
+    x = _x15(m, "2026-10-24 09:40")
+    assert len(x) == 100
+
+
+def test_one_missing_quarter_hour_costs_only_that_quarter_at_15min():
+    """Hourly, one missing quarter kills its hour; at 15 minutes only itself."""
+    m = _m(_days("2026-09-22", "2026-09-25"), drop=["2026-09-25 10:00"])
+    x = _x15(m, "2026-09-26 09:40")
+    hole = x[x["always_buy_d1"].isna()]
+    assert hole["delivery_ts"].dt.strftime("%H:%M").tolist() == ["10:00"]
+
+
+def test_four_quarters_add_up_to_their_hour():
+    """The 15-minute lag of an hour's four quarters sums to the hourly lag."""
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    t = "2026-09-26 09:40"
+    x15 = _x15(m, t)
+    xh = window(rows_for(pd.Timestamp(t, tz="UTC"), "NL"), hourly(m), N, True, "NL")
+    x15 = x15.assign(hour_ts=x15["delivery_ts"].dt.floor("h"))
+    summed = x15.groupby("hour_ts")["always_buy_d1"].sum()
+    hourly_d1 = xh.set_index("delivery_ts")["always_buy_d1"]
+    assert np.allclose(summed.loc[hourly_d1.index].to_numpy(), hourly_d1.to_numpy())
+
+
+def test_bare_prices_are_carried_and_buy_is_the_higher_imbalance_price():
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    m = m.assign(price_da=50.0, price_im_pos_eur=70.0, price_im_neg_eur=40.0)
+    x = _x15(m, "2026-09-26 09:40")
+    assert (x["price_da_d1"] == 50.0).all()
+    assert (x["price_im_buy_d1"] == 70.0).all()
+    assert (x["price_im_sell_d1"] == 40.0).all()
+
+
+def test_quarter_of_hour_is_a_calendar_column():
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    x = calendar(_x15(m, "2026-09-26 09:40"), "NL")
+    assert x["quarter_of_hour"].tolist()[:4] == [0, 1, 2, 3]
+
+
+def test_action_zero_earns_zero():
+    """A decision to stay out (0) earns 0.0; no decision (<NA>) earns nothing."""
+    a = to_action(pd.Series([0.5, 0.9, 0.1, None]), sensitivity=0.1)
+    earned = C.action_pnl(a, [10.0, 10.0, 10.0, 10.0], [-3.0, -3.0, -3.0, -3.0])
+    assert earned[0] == 0.0 and earned[1] == 10.0 and earned[2] == -3.0
+    assert np.isnan(earned[3])
+
