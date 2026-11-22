@@ -69,7 +69,13 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "live"
+      "mode": "live",
+      "models": {
+        "logistic_regression": {
+          "mode": "shadow",
+          "name": "logreg_EE_v1"
+        }
+      }
     },
     "SI": {
       "eic": "10YSI-ELES-----O",
@@ -255,6 +261,7 @@
     "paths": [
       "data/raw",
       "data/processed/results",
+      "data/processed/shadow",
       "data/fx",
       "outputs",
       "settings.json",
