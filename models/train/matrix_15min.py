@@ -16,7 +16,7 @@ areas = ["EE"]
 n_lags = 14
 step = "15min"
 start = datetime(2025, 1, 1, tzinfo=UTC)
-end = datetime(2025, 12, 31, tzinfo=UTC)
+end = datetime(2026, 10, 31, tzinfo=UTC)
 
 matrix = backtest_matrix(areas, start, end, n_lags, step)
 
