@@ -419,6 +419,25 @@ def test_imbalance_can_live_under_another_code(monkeypatch):
     assert cfg.eic_im("EE") == "10Y1001A1001A39I"
 
 
+
+def test_the_http_timeout_comes_from_settings(monkeypatch):
+    """fetch_raw passes the setting to requests, not a constant."""
+    import src.ingest as ingest
+    seen = {}
+
+    def fake_get(url, params=None, timeout=None):
+        seen["timeout"] = timeout
+        raise ingest.requests.RequestException("stop here")
+
+    monkeypatch.setattr(ingest.requests, "get", fake_get)
+    monkeypatch.setattr(cfg, "http_timeout_s", lambda: 17)
+    try:
+        ingest.fetch_raw({"documentType": "A44"}, "A44", "NL")
+    except Exception:
+        pass
+    assert seen["timeout"] == 17
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

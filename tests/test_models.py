@@ -179,3 +179,115 @@ def test_action_zero_earns_zero():
     assert earned[0] == 0.0 and earned[1] == 10.0 and earned[2] == -3.0
     assert np.isnan(earned[3])
 
+
+
+# --- logistic regression from saved coefficients (2026-11-21) ---------------
+
+def test_coefficients_give_exactly_what_scikit_learn_gives():
+    """decide() computes p itself; it must equal predict_proba."""
+    import pytest
+    sklearn_lm = pytest.importorskip("sklearn.linear_model")
+    from models.logreg import decide as lr_decide
+    rng = np.random.default_rng(1)
+    x = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    y = (x["a"] - 0.5 * x["b"] + rng.normal(scale=0.5, size=200) > 0).astype(int)
+    clf = sklearn_lm.LogisticRegression().fit(x.to_numpy(), y.to_numpy())
+    model = {"intercept": float(clf.intercept_[0]),
+             "coefficients": dict(zip(["a", "b"], clf.coef_[0].tolist()))}
+    out = lr_decide(x, model, ["a", "b"])
+    expected = clf.predict_proba(x.to_numpy())[:, 1]
+    assert np.allclose(out["p_buy"].to_numpy(dtype=float), expected, atol=1e-12)
+
+
+def test_a_hole_in_an_input_gives_no_action():
+    from models.logreg import decide as lr_decide
+    x = pd.DataFrame({"a": [1.0, None], "b": [0.5, 0.5]})
+    model = {"intercept": 0.0, "coefficients": {"a": 1.0, "b": 1.0}}
+    out = lr_decide(x, model, ["a", "b"])
+    assert out["action"].iloc[0] == 1 and pd.isna(out["action"].iloc[1])
+
+
+def test_coefficients_round_trip_through_the_model_folder(tmp_path, monkeypatch):
+    import models.model_utils as mu
+    monkeypatch.setattr(mu, "STORAGE", str(tmp_path))
+    coef = {"intercept": 0.2, "coefficients": {"a": 1.5, "b": -0.3}}
+    mu.save_model("logreg_test", ["a", "b"], {"areas": ["EE"]}, coefficients=coef)
+    meta, scaler, model = mu.load_model("logreg_test")
+    assert model == coef and meta["features"] == ["a", "b"] and scaler is None
+
+
+def test_coefficients_that_do_not_match_the_features_are_refused(tmp_path, monkeypatch):
+    import pytest
+    import models.model_utils as mu
+    monkeypatch.setattr(mu, "STORAGE", str(tmp_path))
+    coef = {"intercept": 0.0, "coefficients": {"b": 1.0, "a": 1.0}}
+    with pytest.raises(ValueError):
+        mu.save_model("logreg_bad", ["a", "b"], {}, coefficients=coef)
+
+
+def test_trailing_columns_follow_the_rule_and_refuse_a_short_window():
+    from models.features import trailing_columns
+    x = pd.DataFrame({"always_buy_d1": [1.0, 1.0], "always_buy_d2": [2.0, None],
+                      "always_buy_d3": [-1.0, 0.0],
+                      "always_sell_d1": [-1.0, -1.0], "always_sell_d2": [-2.0, 0.0],
+                      "always_sell_d3": [1.0, 0.0]})
+    x = trailing_columns(x)
+    assert x["trail_diff"].iloc[0] == 4.0 and x["trail_bias"].iloc[0] == 1
+    assert pd.isna(x["trail_diff"].iloc[1]) and pd.isna(x["trail_bias"].iloc[1])
+
+
+# --- a model in shadow (2026-11-22) -------------------------------------------
+
+def _fake_model(name):
+    meta = {"features": ["trail_bias"], "sensitivity": 0.05, "n_lags": 3, "step": "15min"}
+    coefficients = {"intercept": 0.0, "coefficients": {"trail_bias": 1.0}}
+    return meta, None, coefficients
+
+
+def test_shadow_decision_carries_both_actions(monkeypatch):
+    """p = sigmoid(trail_bias): 0.73 where the rule says buy, 0.5 where it says
+    sell. Without sensitivity 0.5 is a sell; with 0.05 it is no position."""
+    import models.model_utils as mu
+    import src.workflow_compute as wc
+    monkeypatch.setattr(mu, "load_model", _fake_model)
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    t = pd.Timestamp("2026-09-26 09:40", tz="UTC")
+    spec = {"mode": "shadow", "name": "fake"}
+    x = wc.shadow_decision(m, t, "NL", "logistic_regression", spec)
+    assert len(x) == 96
+    buy = x["trail_bias"] == 1
+    assert (x.loc[buy, "action"] == 1).all() and (x.loc[buy, "action_sens"] == 1).all()
+    assert (x.loc[~buy, "action"] == -1).all() and (x.loc[~buy, "action_sens"] == 0).all()
+    assert (x["model_name"] == "fake").all() and (x["sensitivity"] == 0.05).all()
+
+
+def test_a_failing_shadow_model_does_not_stop_the_rule(monkeypatch, caplog):
+    import logging
+    import src.config as cfg
+    import src.workflow_compute as wc
+
+    def models_of(area):
+        return {"logistic_regression": {"mode": "shadow", "name": "broken"}}
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("model file missing")
+
+    monkeypatch.setattr(cfg, "zone_models", models_of)
+    monkeypatch.setattr(wc, "shadow_decision", broken)
+    m = _m(_days("2026-09-22", "2026-09-25"))
+    t = pd.Timestamp("2026-09-26 09:40", tz="UTC")
+    with caplog.at_level(logging.ERROR):
+        wc.shadow_models(m, t, "NL", logging.getLogger("test"), persist=False)
+    assert "FAILED" in caplog.text
+
+
+def test_a_model_with_an_unknown_mode_is_refused(monkeypatch):
+    import pytest
+    import src.config as cfg
+
+    def zone_of(area):
+        return {"models": {"logistic_regression": {"mode": "maybe", "name": "x"}}}
+
+    monkeypatch.setattr(cfg, "zone", zone_of)
+    with pytest.raises(ValueError):
+        cfg.zone_models("EE")
