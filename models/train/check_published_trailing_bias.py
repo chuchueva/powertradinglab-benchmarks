@@ -11,7 +11,7 @@ import src.workflow_compute as wc
 from models.features import build_matrix
 from models.trailing_bias import decide
 
-area = "RO"
+area = "EE"
 tol = 1e-6                       # EUR per MW; float sums in a different order
 
 
