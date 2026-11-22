@@ -53,6 +53,34 @@ def zone(area: str) -> dict:
 ZONE_MODES = ("shadow", "live")
 
 
+MODEL_MODES = ("shadow", "live")
+
+
+def zone_models(area: str) -> dict:
+    """
+    The models a zone runs besides trailing bias (2026-11-22), each with its
+    own mode:
+
+        "models": {"logistic_regression": {"mode": "shadow",
+                                           "name": "logreg_EE_v1"}}
+
+    `name` is the folder in models/_model_storage; everything else the model
+    needs (inputs, step, lags, sensitivity) is in that folder's meta.json, so
+    it is not repeated here. A zone without the block runs trailing bias only.
+
+    "shadow": decided every morning and written to data/processed/shadow,
+    nothing stored in the results, nothing published. "live": not built yet.
+    """
+    models = dict(zone(area).get("models", {}))
+    for kind, spec in models.items():
+        mode = spec.get("mode")
+        if mode not in MODEL_MODES:
+            raise ValueError(f"zone {area}, model {kind}: mode {mode!r} is not one of {MODEL_MODES}")
+        if not spec.get("name"):
+            raise ValueError(f"zone {area}, model {kind}: no \"name\" (the folder in models/_model_storage)")
+    return models
+
+
 def zone_mode(area: str) -> str:
     """
     How much of a zone is real: "shadow" or "live".
