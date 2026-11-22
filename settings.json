@@ -235,6 +235,7 @@
     "refetch_time_utc": "08:00",
     "retry_attempts": 4,
     "retry_delay_s": 300,
+    "http_timeout_s": 60,
     "retry_stop_minutes_before_gate": 5,
     "poll_workers": 4,
     "poll_stagger_s": 3,

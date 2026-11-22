@@ -453,6 +453,14 @@ def retry_delay_s() -> int:
     return int(_UPDATE.get("retry_delay_s", 300))
 
 
+def http_timeout_s() -> int:
+    """How long one request to the source may take before we give up, seconds
+    (2026-11-22; was the constant 60 in ingest.py). During the ENTSO-E
+    migration (2026-09) six of eight failures in one morning were this timeout,
+    not the source's error — so it is a setting, to be changed in one line."""
+    return int(_UPDATE.get("http_timeout_s", 60))
+
+
 def poll_workers() -> int:
     """How many zones are polled at the same time (2026-11-16). The source
     answers each request in 10-15 s on a good day and 30-70 s on a slow one,

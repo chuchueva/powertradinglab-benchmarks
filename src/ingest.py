@@ -37,6 +37,11 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+try:
+    import src.config as cfg
+except ImportError:          # run as a plain script from src/
+    import config as cfg
+
 BASE_URL = "https://web-api.tp.entsoe.eu/api"
 # Every path in this project is anchored to the REPOSITORY, never to the
 # current directory. Relative paths do not fail when a script is run from
@@ -130,7 +135,8 @@ def fetch_raw(params: dict, doc_label: str, area: str) -> Path:
     """
     full_params = {"securityToken": API_KEY, **params}
     try:
-        resp = requests.get(BASE_URL, params=full_params, timeout=60)
+        timeout_s = cfg.http_timeout_s()
+        resp = requests.get(BASE_URL, params=full_params, timeout=timeout_s)
     except requests.RequestException as e:
         # The token travels as a URL PARAMETER, so requests' own exception text
         # quotes the whole URL, key and all — which is how it ended up in the log
