@@ -193,7 +193,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "FR": {
       "eic": "10YFR-RTE------C",
@@ -202,7 +202,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "PL": {
       "eic": "10YPL-AREA-----S",
@@ -211,7 +211,7 @@
         "DA": "EUR",
         "IM": "PLN"
       },
-      "mode": "shadow"
+      "mode": "live"
     },
     "LV": {
       "eic": "10YLV-1001A00074",
@@ -220,7 +220,7 @@
         "DA": "EUR",
         "IM": "EUR"
       },
-      "mode": "shadow"
+      "mode": "live"
     }
   },
   "stat_action": {
