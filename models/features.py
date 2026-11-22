@@ -54,7 +54,8 @@ from src.workflow import load_store
 
 PTU_PER_HOUR = 4
 PTU_PER_SLOT = {"h": 4, "15min": 1}   # quarter-hours in one row, per step
-N_LAGS = 14   # the matrix carries d1..d14; each model takes what it needs
+N_LAGS = 14
+TRAIL_DAYS = 3   # the window of trail_bias / trail_diff (the trailing-bias rule's)   # the matrix carries d1..d14; each model takes what it needs
 DAY = pd.Timedelta(days=1)
 
 
@@ -156,7 +157,8 @@ def matrix_from(m: pd.DataFrame, knownby_ts: pd.Timestamp, area: str,
     rows = rows_for(knownby_ts, area, step)
     s = slots(m, step)
     x = window(rows, s, n_lags, fresh, area, step)
-    return calendar(x, area)
+    x = calendar(x, area)
+    return trailing_columns(x)
 
 
 def matrix_at(da: pd.DataFrame, im: pd.DataFrame, knownby_ts: pd.Timestamp,
@@ -175,6 +177,30 @@ def build_matrix(area: str, knownby_list, n_lags: int = None, fresh: bool = True
     da, im = load_store(area)
     parts = [matrix_at(da, im, pd.Timestamp(t), area, n_lags, fresh, step) for t in knownby_list]
     return pd.concat(parts, ignore_index=True)
+
+
+def trailing_columns(x: pd.DataFrame, n_days: int = TRAIL_DAYS) -> pd.DataFrame:
+    """
+    The trailing-bias rule as model inputs, from the lags already in the row:
+
+        trail_buy    sum of always_buy_d1..dN
+        trail_sell   sum of always_sell_d1..dN
+        trail_diff   trail_buy - trail_sell
+        trail_bias   1 if trail_buy > trail_sell, else 0 (the rule's +1 / -1)
+
+    A missing lag gives <NA> in all four — never a sum over what is there
+    (rule 9: a short window is not a window).
+    """
+    x = x.copy()
+    buy_cols = [f"always_buy_d{k}" for k in range(1, n_days + 1)]
+    sell_cols = [f"always_sell_d{k}" for k in range(1, n_days + 1)]
+    x["trail_buy"] = x[buy_cols].sum(axis=1, skipna=False)
+    x["trail_sell"] = x[sell_cols].sum(axis=1, skipna=False)
+    x["trail_diff"] = x["trail_buy"] - x["trail_sell"]
+    formed = x["trail_diff"].notna()
+    bias = (x["trail_buy"] > x["trail_sell"]).astype("Int64")
+    x["trail_bias"] = bias.where(formed, pd.NA)
+    return x
 
 
 def calendar(x: pd.DataFrame, area: str) -> pd.DataFrame:
@@ -241,7 +267,9 @@ def backtest_matrix(areas, start, end, n_lags: int = None, step: str = "h") -> p
         rows = pd.concat([rows_for(t, area, step) for t in decision_instants(start, end)],
                          ignore_index=True)
         x = window(rows, h, n_lags, fresh=False, area=area, step=step)
-        parts.append(calendar(x, area))
+        x = calendar(x, area)
+        x = trailing_columns(x)
+        parts.append(x)
     return pd.concat(parts, ignore_index=True)
 
 

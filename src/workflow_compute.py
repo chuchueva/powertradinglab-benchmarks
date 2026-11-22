@@ -74,6 +74,14 @@ from src.workflow import (PROCESSED, ROOT, for_each_area, load_store,
 RESULTS_DIR = os.path.join(ROOT, cfg.path("results"))
 FORECASTS = os.path.join(RESULTS_DIR, "forecasts.parquet")
 SCORES = os.path.join(RESULTS_DIR, "scores.parquet")
+# A model in SHADOW writes its morning decisions here, one file per model and
+# zone, never into the results and never published (2026-11-22).
+SHADOW_DIR = os.path.join(PROCESSED, "shadow")
+
+
+def shadow_path(kind: str, area: str) -> str:
+    """data/processed/shadow/<kind>_<area>.parquet, e.g. logistic_regression_EE."""
+    return os.path.join(SHADOW_DIR, f"{kind}_{area}.parquet")
 # `area` belongs in the key even while there is only one zone. Without it, an FR
 # row and an NL row for the same PTU computed at the same instant are the same
 # key, and _append's drop_duplicates would discard one WITHOUT a word — a loss
@@ -516,6 +524,67 @@ def _refuse_after_gate(target_day: date, gate: pd.Timestamp,
 # --------------------------------------------------------------------------- #
 # forecast
 # --------------------------------------------------------------------------- #
+def shadow_decision(m: pd.DataFrame, current_ts: pd.Timestamp, area: str,
+                    kind: str, spec: dict) -> pd.DataFrame:
+    """
+    One model's decision for the next delivery day, from the quarter-hour
+    matrix `m` as it stood at current_ts — the same `m` the trailing-bias rule
+    reads. Returns the matrix rows with every input, every term, the output and
+    BOTH actions: `action` (always trades, +1/-1) and `action_sens` (+1/0/-1
+    with the model's sensitivity). Nothing is written here.
+    """
+    if kind != "logistic_regression":
+        raise ValueError(f"unknown model kind {kind!r}")
+    # (Imported here: models.features imports this module.)
+    from models.features import matrix_from, scale
+    from models.logreg import decide as lr_decide
+    from models.model_utils import load_model
+
+    meta, scaler, model = load_model(spec["name"])
+    features = meta["features"]
+    sensitivity = float(meta["sensitivity"])
+    x = matrix_from(m, current_ts, area, n_lags=int(meta["n_lags"]), fresh=True,
+                    step=meta["step"])
+    if scaler is not None:
+        x = scale(x, scaler)
+
+    out = lr_decide(x, model, features, None)
+    sens = lr_decide(x, model, features, sensitivity)
+    out["action_sens"] = sens["action"]
+    out["model_kind"] = kind
+    out["model_name"] = spec["name"]
+    out["model_mode"] = spec["mode"]
+    out["sensitivity"] = sensitivity
+    return out
+
+
+def shadow_models(m: pd.DataFrame, current_ts: pd.Timestamp, area: str,
+                  log, persist: bool) -> None:
+    """Run every model of the zone that is in shadow; write when persisting."""
+    for kind, spec in cfg.zone_models(area).items():
+        if spec["mode"] != "shadow":
+            continue
+        try:
+            x = shadow_decision(m, current_ts, area, kind, spec)
+        except Exception:                    # noqa: BLE001 - logged, the rule goes on
+            log.exception("shadow %s %s @ %s: FAILED — the trailing-bias forecast "
+                          "is not affected", kind, area, current_ts)
+            continue
+        n = len(x)
+        decided = int(x["action"].notna().sum())
+        buy = int((x["action_sens"] == 1).sum())
+        sell = int((x["action_sens"] == -1).sum())
+        idle = int((x["action_sens"] == 0).sum())
+        written = "" if persist else " — not written (simulation)"
+        log.info("shadow %s %s @ %s: %d of %d slots decided; with sensitivity "
+                 "%.2f: %d buy, %d sell, %d no position (model %s)%s",
+                 kind, area, current_ts, decided, n, x["sensitivity"].iloc[0],
+                 buy, sell, idle, spec["name"], written)
+        if persist:
+            path = shadow_path(kind, area)
+            _append(path, x, list(x.columns))
+
+
 def forecast(current_ts: pd.Timestamp, area: str,
              log=None, persist: bool = True) -> pd.DataFrame:
     """Decide the DA action for every PTU of the next delivery day."""
@@ -536,6 +605,11 @@ def forecast(current_ts: pd.Timestamp, area: str,
         reason, detail = _refuse_after_gate(target_day, gate, current_ts)
         return _no_forecast(current_ts, area, ptus, m, reason, detail,
                             n_days, log, persist)
+
+    # Models in shadow decide on the same matrix at the same instant and are
+    # written aside. Before the trailing-bias rule and independent of it: a
+    # model that fails is logged, and the rule's forecast goes on regardless.
+    shadow_models(m, current_ts, area, log, persist)
 
     # The signal comes from the MATRIX (models/features.py): one row per
     # delivery hour, the window tied to timestamps — d1 is today's hour if it
