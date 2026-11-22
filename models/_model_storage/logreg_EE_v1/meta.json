@@ -1,0 +1,27 @@
+{
+  "name": "logreg_EE_v1",
+  "features": [
+    "trail_bias",
+    "price_da_d1",
+    "price_da_d2",
+    "price_da_d3",
+    "weekday_local",
+    "month_local",
+    "is_weekend"
+  ],
+  "areas": [
+    "EE"
+  ],
+  "step": "15min",
+  "n_lags": 3,
+  "start": "2025-01-01 00:00:00+00:00",
+  "end": "2026-10-31 00:00:00+00:00",
+  "weights": "stake = |always_buy - always_sell|",
+  "sensitivity": 0.05,
+  "sensitivity_rule": "drop approx 30% least confident on training",
+  "versions": {
+    "sklearn": "1.9.1",
+    "numpy": "2.5.1",
+    "pandas": "3.0.5"
+  }
+}
