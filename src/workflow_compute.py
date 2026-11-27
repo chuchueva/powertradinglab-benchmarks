@@ -555,6 +555,11 @@ def shadow_decision(m: pd.DataFrame, current_ts: pd.Timestamp, area: str,
     out["model_name"] = spec["name"]
     out["model_mode"] = spec["mode"]
     out["sensitivity"] = sensitivity
+    # The bid's price limits (meta.json, absent in models saved before
+    # 2026-11-24 -> no limit). Applied at scoring by filled_action(); written
+    # here so every row says which bid it stands for.
+    out["da_buy_limit"] = meta.get("da_buy_limit")
+    out["da_sell_limit"] = meta.get("da_sell_limit")
     return out
 
 
