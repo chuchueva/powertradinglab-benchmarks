@@ -73,7 +73,7 @@
       "models": {
         "logistic_regression": {
           "mode": "shadow",
-          "name": "logreg_EE_v1"
+          "name": "logreg_EE_v2"
         }
       }
     },
