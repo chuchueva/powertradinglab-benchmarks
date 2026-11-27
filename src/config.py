@@ -53,6 +53,28 @@ def zone(area: str) -> dict:
 ZONE_MODES = ("shadow", "live")
 
 
+def zone_events(area: str) -> dict:
+    """
+    Market events of a zone (2026-11-23): {name: UTC instant}, e.g.
+
+        "events": {"picasso": "2026-09-30T22:00:00Z"}
+
+    A regime change the models must be able to see — HU joined PICASSO on
+    2026-10-01 local midnight, and the three-day bias that had persisted
+    there started to reverse. The instant is UTC (rule 1): the zone's local
+    midnight written as a UTC moment. models/features.py turns each event
+    into model inputs (event_<name>, event_<name>_x_trail_bias).
+    """
+    import pandas as pd
+    out = {}
+    for name, ts in dict(zone(area).get("events", {})).items():
+        t = pd.Timestamp(ts)
+        if t.tzinfo is None:
+            raise ValueError(f"zone {area}, event {name}: {ts!r} has no timezone — write it in UTC, e.g. 2026-09-30T22:00:00Z")
+        out[name] = t.tz_convert("UTC")
+    return out
+
+
 MODEL_MODES = ("shadow", "live")
 
 

@@ -158,7 +158,9 @@ def matrix_from(m: pd.DataFrame, knownby_ts: pd.Timestamp, area: str,
     s = slots(m, step)
     x = window(rows, s, n_lags, fresh, area, step)
     x = calendar(x, area)
-    return trailing_columns(x)
+    x = trailing_columns(x)
+    x = derived_columns(x)
+    return event_columns(x, area)
 
 
 def matrix_at(da: pd.DataFrame, im: pd.DataFrame, knownby_ts: pd.Timestamp,
@@ -200,6 +202,66 @@ def trailing_columns(x: pd.DataFrame, n_days: int = TRAIL_DAYS) -> pd.DataFrame:
     formed = x["trail_diff"].notna()
     bias = (x["trail_buy"] > x["trail_sell"]).astype("Int64")
     x["trail_bias"] = bias.where(formed, pd.NA)
+    return x
+
+
+def derived_columns(x: pd.DataFrame) -> pd.DataFrame:
+    """
+    Inputs computed from other inputs of the same row (2026-11-23):
+
+        price_da_d3_d2_diff   price_da_d2 - price_da_d3: how the day-ahead
+                              price of the slot moved from three days back to
+                              two (DE_LU: the model weighed d2 and d3 almost
+                              equally with opposite signs — it reads the change)
+        price_da_d2_d1_diff   price_da_d1 - price_da_d2: the same, one day
+                              closer — from two days back to one (HR weighed
+                              d1 and d2 almost equally with opposite signs)
+
+Both are "newer minus older": positive means the price rose.
+
+        price_da_d1_negative    1 if price_da_d1 < 0, else 0 (2026-11-24)
+        price_da_d1_x_negative  price_da_d1 * price_da_d1_negative: a slope
+                                of its own for negative-price slots — on the
+                                tails the price-level relation turns over
+                                (AT: in cheap solar hours imbalance falls
+                                further, the model bought and lost)
+
+    <NA> where either lag is missing. A matrix without prices, or with fewer
+    than three lags, gets no such column.
+    """
+    x = x.copy()
+    if "price_da_d2" in x.columns and "price_da_d3" in x.columns:
+        x["price_da_d3_d2_diff"] = x["price_da_d2"] - x["price_da_d3"]
+    if "price_da_d1" in x.columns and "price_da_d2" in x.columns:
+        x["price_da_d2_d1_diff"] = x["price_da_d1"] - x["price_da_d2"]
+    if "price_da_d1" in x.columns:
+        negative = (x["price_da_d1"] < 0).astype("Int64")
+        x["price_da_d1_negative"] = negative.where(x["price_da_d1"].notna(), pd.NA)
+        x["price_da_d1_x_negative"] = x["price_da_d1"] * x["price_da_d1_negative"]
+    return x
+
+
+def event_columns(x: pd.DataFrame, area: str) -> pd.DataFrame:
+    """
+    One pair of inputs per market event of the zone (settings.json ->
+    zones.<ZONE>.events; 2026-11-23):
+
+        event_<name>                 0 before the event's instant, 1 from it
+                                     (by the row's delivery_ts)
+        event_<name>_x_trail_bias    event_<name> * trail_bias: lets the
+                                     trailing-bias input change its effect,
+                                     even its sign, after the event
+
+    HU after PICASSO is the case: the three-day bias that persisted before
+    started to reverse. A zone without events gets no such columns; a model
+    that lists one on such a zone fails in decide(), loudly.
+    """
+    x = x.copy()
+    for name, ts in cfg.zone_events(area).items():
+        col = f"event_{name}"
+        x[col] = (x["delivery_ts"] >= ts).astype(int)
+        if "trail_bias" in x.columns:
+            x[f"{col}_x_trail_bias"] = x[col] * x["trail_bias"]
     return x
 
 
@@ -269,25 +331,37 @@ def backtest_matrix(areas, start, end, n_lags: int = None, step: str = "h") -> p
         x = window(rows, h, n_lags, fresh=False, area=area, step=step)
         x = calendar(x, area)
         x = trailing_columns(x)
+        x = derived_columns(x)
+        x = event_columns(x, area)
         parts.append(x)
     return pd.concat(parts, ignore_index=True)
 
 
 def outcome(areas, step: str = "h") -> pd.DataFrame:
     """
-    What each delivery slot (hour, or quarter-hour with step "15min") actually paid, per 1 MW, from the benchmark
-    (benchmarks_core.add_pnl): always_buy, always_sell, ideal, devil, ptu.
+    What each delivery slot (hour, or quarter-hour with step "15min") actually
+    paid, per 1 MW, from the benchmark (benchmarks_core.add_pnl): always_buy,
+    always_sell, ideal, devil, ptu — plus the slot's own prices, EUR/MWh, mean
+    over the slot (2026-11-24): price_da, price_im_buy (the higher imbalance
+    price), price_im_sell (the lower). The prices are what a training script
+    needs to leave spikes out of the fit, and what filled_action() needs to
+    tell whether a day-ahead bid with a price limit would have been filled.
     Store's latest versions. Join to the matrix on (area, delivery_ts).
     """
     areas = [areas] if isinstance(areas, str) else list(areas)
     parts = []
     for area in areas:
         m = _latest_matrix(area)
-        h = (m.assign(delivery_ts=m["delivery_ts"].dt.floor(step))
-               .groupby("delivery_ts", as_index=False)
-               .agg(always_buy=("always_buy", "sum"), always_sell=("always_sell", "sum"),
-                    ideal=("ideal", "sum"), devil=("devil", "sum"),
-                    ptu=("always_buy", "size")))
+        m = m.assign(delivery_ts=m["delivery_ts"].dt.floor(step),
+                     price_im_buy=m[C._EUR_COLS].max(axis=1),
+                     price_im_sell=m[C._EUR_COLS].min(axis=1))
+        h = m.groupby("delivery_ts", as_index=False).agg(
+            always_buy=("always_buy", "sum"), always_sell=("always_sell", "sum"),
+            ideal=("ideal", "sum"), devil=("devil", "sum"),
+            ptu=("always_buy", "size"),
+            price_da=("price_da", "mean"),
+            price_im_buy=("price_im_buy", "mean"),
+            price_im_sell=("price_im_sell", "mean"))
         h.insert(0, "area", area)
         parts.append(h)
     return pd.concat(parts, ignore_index=True)

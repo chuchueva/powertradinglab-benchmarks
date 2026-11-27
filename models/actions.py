@@ -36,3 +36,36 @@ def to_action(p: pd.Series, sensitivity: float | None = None) -> pd.Series:
     out = pd.Series(pd.array(a, dtype="Int8"), index=index)
     out[na] = pd.NA
     return out
+
+
+def filled_action(action, price_da, buy_limit: float | None = None,
+                  sell_limit: float | None = None) -> pd.Series:
+    """
+    The action after the day-ahead auction, for a bid with a price limit
+    (2026-11-24). A strategy bids +1 MW @ buy_limit (buy only if the auction
+    clears at or below it) and -1 MW @ sell_limit (sell only at or above it):
+
+        +1 and price_da >  buy_limit    -> 0   (not filled)
+        -1 and price_da <  sell_limit   -> 0   (not filled)
+        otherwise                       -> the action as it was
+        <NA>                            -> <NA> (no decision stays no decision)
+
+    A limit of None means no limit on that side. What a filled action earned
+    is still benchmarks_core.action_pnl — this only says what was filled.
+    The trailing-bias BENCHMARK bids without limits by definition; limits
+    belong to strategies (the Portfolio models).
+    """
+    index = action.index if isinstance(action, pd.Series) else None
+    a = pd.Series(action, dtype="Int8").reset_index(drop=True)
+    p = pd.Series(price_da, dtype="float64").reset_index(drop=True)
+    out = a.copy()
+    if buy_limit is not None:
+        unfilled_buy = (a == 1).fillna(False) & (p > buy_limit)
+        out[unfilled_buy.to_numpy(dtype=bool)] = 0
+    if sell_limit is not None:
+        unfilled_sell = (a == -1).fillna(False) & (p < sell_limit)
+        out[unfilled_sell.to_numpy(dtype=bool)] = 0
+    if index is not None:
+        out.index = index
+    return out
+

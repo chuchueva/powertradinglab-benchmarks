@@ -76,6 +76,9 @@ def save_model(name: str, features: list[str], meta: dict,
     with open(os.path.join(folder, "meta.json"), "w") as f:
         json.dump({"name": name, "features": features, **meta,
                    "versions": _versions()}, f, indent=2, default=str)
+    files = sorted(os.listdir(folder))
+    print(f"model {name} saved: {folder} ({', '.join(files)}), "
+          f"{len(features)} features")
     return folder
 
 
