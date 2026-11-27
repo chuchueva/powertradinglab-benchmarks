@@ -291,3 +291,74 @@ def test_a_model_with_an_unknown_mode_is_refused(monkeypatch):
     monkeypatch.setattr(cfg, "zone", zone_of)
     with pytest.raises(ValueError):
         cfg.zone_models("EE")
+
+
+def test_price_change_from_d3_to_d2():
+    from models.features import derived_columns
+    x = pd.DataFrame({"price_da_d2": [110.0, None], "price_da_d3": [100.0, 90.0]})
+    x = derived_columns(x)
+    assert x["price_da_d3_d2_diff"].iloc[0] == 10.0
+    assert pd.isna(x["price_da_d3_d2_diff"].iloc[1])
+
+
+def test_price_change_from_d2_to_d1():
+    from models.features import derived_columns
+    x = pd.DataFrame({"price_da_d1": [95.0, 80.0], "price_da_d2": [100.0, None]})
+    x = derived_columns(x)
+    assert x["price_da_d2_d1_diff"].iloc[0] == -5.0
+    assert pd.isna(x["price_da_d2_d1_diff"].iloc[1])
+
+
+def test_an_event_switches_at_its_instant_and_interacts_with_trail_bias(monkeypatch):
+    import src.config as cfg
+    from models.features import event_columns
+
+    def events_of(area):
+        return {"picasso": pd.Timestamp("2026-09-30 22:00", tz="UTC")} if area == "HU" else {}
+
+    monkeypatch.setattr(cfg, "zone_events", events_of)
+    ts = pd.to_datetime(["2026-09-30 21:45", "2026-09-30 22:00", "2026-10-01 10:00"], utc=True)
+    x = pd.DataFrame({"delivery_ts": ts, "trail_bias": pd.array([1, 1, 0], dtype="Int64")})
+    hu = event_columns(x, "HU")
+    assert hu["event_picasso"].tolist() == [0, 1, 1]
+    assert hu["event_picasso_x_trail_bias"].tolist() == [0, 1, 0]
+    ee = event_columns(x, "EE")
+    assert "event_picasso" not in ee.columns
+
+
+def test_an_event_without_a_timezone_is_refused(monkeypatch):
+    import pytest
+    import src.config as cfg
+
+    def zone_of(area):
+        return {"events": {"picasso": "2026-10-01 00:00"}}
+
+    monkeypatch.setattr(cfg, "zone", zone_of)
+    with pytest.raises(ValueError):
+        cfg.zone_events("HU")
+
+
+def test_a_bid_outside_its_price_limit_is_not_filled():
+    from models.actions import filled_action
+    action = pd.array([1, 1, -1, -1, 0, None], dtype="Int8")
+    price = [800.0, 700.0, -300.0, -100.0, 900.0, 900.0]
+    out = filled_action(pd.Series(action), price, buy_limit=750, sell_limit=-250)
+    assert out.tolist()[:5] == [0, 1, 0, -1, 0]
+    assert pd.isna(out.iloc[5])
+
+
+def test_no_limit_changes_nothing():
+    from models.actions import filled_action
+    action = pd.Series(pd.array([1, -1], dtype="Int8"))
+    out = filled_action(action, [5000.0, -5000.0])
+    assert out.tolist() == [1, -1]
+
+
+def test_negative_price_indicator_and_its_slope():
+    from models.features import derived_columns
+    x = pd.DataFrame({"price_da_d1": [-30.0, 40.0, None]})
+    x = derived_columns(x)
+    assert x["price_da_d1_negative"].iloc[0] == 1 and x["price_da_d1_negative"].iloc[1] == 0
+    assert x["price_da_d1_x_negative"].iloc[0] == -30.0 and x["price_da_d1_x_negative"].iloc[1] == 0.0
+    assert pd.isna(x["price_da_d1_negative"].iloc[2]) and pd.isna(x["price_da_d1_x_negative"].iloc[2])
+
